@@ -32,3 +32,6 @@ link_directories(${LIBWB_LIB_DIR})
 
 cuda_add_executable(AES_Encrypt_GCM_128_Seq AES_Encrypt_GCM_128_Seq.cu)
 target_link_libraries(AES_Encrypt_GCM_128_Seq  wb)
+
+cuda_add_executable(AES_Encrypt_GCM_128_gpu AES_Encrypt_GCM_128_gpu.cu)
+target_link_libraries(AES_Encrypt_GCM_128_gpu  wb)
