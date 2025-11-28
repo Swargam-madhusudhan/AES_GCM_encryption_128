@@ -742,7 +742,7 @@ int main(int argc, char *argv[])
 
     // Launching Sequential
     // ----------------------------------------------------------
-    wbLog(TRACE, "Launching Sequential computation");
+    wbLog(TRACE, "Launching GPU computation");
     wbTime_start(Compute, "Performing CUDA computation");
     //@@ Perform Sequential computation here
     aes_gcm_128_encrypt(
