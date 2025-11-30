@@ -11,10 +11,6 @@
  * @copyright
  */
 
-
-
-
-
 #include <wb.h>
 
 #define wbCheck(stmt)                                                     \
@@ -89,7 +85,8 @@ typedef byte state_t[4][4];
 									 0xf1, 0x8a, 0xf5, 0x3f,
 									 0x72, 0xf7, 0xfd, 0x17};//20 bytes - 160 bytes
 
- 
+ __constant__ byte d_sbox[256];
+  __constant__ byte d_RoundKey[176];
  /*
   * SUBBYTES uses substitution table called as S-box.
   *
@@ -145,10 +142,20 @@ static const byte Rcon[11] = {
  *
  * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf Chapter 5.1.1
  */
+
 void SubBytes(state_t* state) {
     for (int i = 0; i < 4; ++i) {
         for (int j = 0; j < 4; ++j) {
             (*state)[j][i] = sbox[(*state)[j][i]];
+        }
+    }
+}
+
+__device__
+void d_SubBytes(state_t* state) {
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            (*state)[j][i] = d_sbox[(*state)[j][i]];
         }
     }
 }
@@ -160,7 +167,7 @@ void SubBytes(state_t* state) {
  *
  * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf Chapter 5.1.4
  */
- 
+ __host__ __device__
  void AddRoundKey(byte round, state_t* state, const byte* RoundKey) {
     for (int i = 0; i < 4; ++i) {
         for (int j = 0; j < 4; ++j) {
@@ -173,6 +180,7 @@ void SubBytes(state_t* state) {
  *
  * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
  */
+ __host__ __device__
 void ShiftRows(state_t* state) {
     byte temp;
     temp = (*state)[1][0];
@@ -195,6 +203,7 @@ void ShiftRows(state_t* state) {
 
 
 /*Multiplication in GF(28) */
+ __host__ __device__
 byte xtime(byte x) {
     return ((x << 1) ^ (((x >> 7) & 1) * 0x1b));
 }
@@ -205,6 +214,7 @@ byte xtime(byte x) {
  *
  * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
  */
+ __host__ __device__
 void MixColumns(state_t* state) {
     byte a, b, c, d;
     for (int i = 0; i < 4; ++i) {
@@ -227,6 +237,7 @@ void MixColumns(state_t* state) {
  *
  * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf Chapter 5.2
  */
+ 
  void KeyExpansion(byte RoundKey[176], const byte Key[16]) {
     unsigned i, j, k;
     byte temp[4];
@@ -280,7 +291,8 @@ void MixColumns(state_t* state) {
  * TODO
  *
  * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
- */
+ */ 
+
 void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) {
     state_t state_buf;
     state_t* s = &state_buf;
@@ -297,6 +309,33 @@ void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) 
         AddRoundKey(round, s, RoundKey);
     }
     SubBytes(s);
+    ShiftRows(s);
+    AddRoundKey(Nr, s, RoundKey);
+    for(int i=0; i<4; ++i) {
+        for(int j=0; j<4; ++j) {
+            out[i*4 + j] = (*s)[j][i];
+        }
+    }
+}
+
+
+__device__
+void d_AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) {
+    state_t state_buf;
+    state_t* s = &state_buf;
+    for(int i=0; i<4; ++i) {
+        for(int j=0; j<4; ++j) {
+            (*s)[j][i] = in[i*4 + j];
+        }
+    }
+    AddRoundKey(0, s, RoundKey);
+    for (int round = 1; round < Nr; ++round) {
+        d_SubBytes(s);
+        ShiftRows(s);
+        MixColumns(s);
+        AddRoundKey(round, s, RoundKey);
+    }
+    d_SubBytes(s);
     ShiftRows(s);
     AddRoundKey(Nr, s, RoundKey);
     for(int i=0; i<4; ++i) {
@@ -384,6 +423,65 @@ void gctr(const byte* RoundKey, const block_t ICB, const byte* in, size_t len_bi
     }
 }
 
+
+// GCTR: AES-CTR mode encryption   Header TODO
+__global__
+void gctr_kernel( byte*  J0, const byte* PT, size_t num_blocks, byte* CT) {
+    
+     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    
+        if (idx >= num_blocks) return;
+    byte ctr_block[16];
+    byte enc_ctr_block[16];
+    
+    // --- CRITICAL: COUNTER CALCULATION ---
+    // 1. Copy J0 (which ends in 0...01)
+    for(int i=0; i<16; ++i) ctr_block[i] = J0[i];
+    
+    // 2. Extract the last 4 bytes as a big-endian integer
+    uint32_t val = (ctr_block[12] << 24) | 
+                   (ctr_block[13] << 16) | 
+                   (ctr_block[14] << 8)  | 
+                   ctr_block[15];
+    
+    // 3. Increment.
+    // Block 0 needs J0 + 1
+    // Block 1 needs J0 + 2
+    // Block idx needs J0 + 1 + idx
+    val += (idx + 1); 
+    
+    // 4. Write back as big-endian
+    ctr_block[12] = (val >> 24) & 0xFF;
+    ctr_block[13] = (val >> 16) & 0xFF;
+    ctr_block[14] = (val >> 8)  & 0xFF;
+    ctr_block[15] = (val)       & 0xFF;
+  // Encrypt
+    d_AES_encrypt_block(enc_ctr_block, ctr_block, d_RoundKey);
+          
+          
+    // --- XOR ---
+    // 
+   // for(int i=0; i<16; ++i) {
+       // CT[idx*16 + i] = PT[idx*16 + i] ^ enc_ctr_block[i];
+
+    
+    const ulong2* pt_ptr = reinterpret_cast<const ulong2*>(&PT[idx * 16]);
+    ulong2* ct_ptr       = reinterpret_cast<ulong2*>(&CT[idx * 16]);
+
+    
+    ulong2 pt_vec = *pt_ptr;
+
+    ulong2 enc_vec = *reinterpret_cast<ulong2*>(enc_ctr_block);
+
+    ulong2 res_vec;
+    res_vec.x = pt_vec.x ^ enc_vec.x; // XOR first 64 bits
+    res_vec.y = pt_vec.y ^ enc_vec.y; // XOR second 64 bits
+
+    *ct_ptr = res_vec;
+
+}
+
+
 //   Header TODO
 void ghash(const block_t H, const byte* X, size_t len_bits, block_t S) {
     block_t Y;
@@ -439,28 +537,51 @@ int aes_gcm_128_encrypt(
     size_t Taglen_bytes
 ) {
     byte RoundKey[176];
-    KeyExpansion(RoundKey, Key);
+    KeyExpansion(RoundKey, Key); // Execute in the GPU if possible 
 
     block_t H, Z;
     memset(Z, 0, 16);
-    AES_encrypt_block(H, Z, RoundKey);
+    AES_encrypt_block(H, Z, RoundKey); // optimize using TTable techniques 
 
     block_t J0;
     memcpy(J0, IV, 12);
     J0[12] = 0; J0[13] = 0; J0[14] = 0; J0[15] = 1;
 
+    byte h_J0[16]; 
+    memcpy(h_J0, HardCoded_IV, 12); 
+    h_J0[12]=0; h_J0[13]=0; h_J0[14]=0; h_J0[15]=1; 
+  
+int threads = 1024; 
+    int num_blocks = ((PTlen_bits/8) + 15) / 16;
+    int blocks = (num_blocks + threads - 1) / threads;
+    if (blocks == 0) blocks = 1;
+    
+    //byte* dev_RoundKey;
+    byte* d_J0;
+    byte* dev_PT;
+    byte* dev_CT;
+
+    cudaMalloc(&d_J0, 16);
+    wbCheck(cudaMemcpy(d_J0, h_J0,16,cudaMemcpyHostToDevice));
+
+    wbCheck(cudaMalloc((void **)&dev_PT,PTlen_bits/8));
+    wbCheck(cudaMemcpy(dev_PT, PT,PTlen_bits/8,cudaMemcpyHostToDevice));
+
+    wbCheck(cudaMalloc((void **)&dev_CT,PTlen_bits/8));
+    cudaMemcpyToSymbol(d_sbox, sbox, 256);
+    cudaMemcpyToSymbol(d_RoundKey, RoundKey, 176);
+    gctr_kernel<<<blocks, threads>>>(d_J0, dev_PT, num_blocks, dev_CT);
+    cudaDeviceSynchronize();
+    
+
+    wbCheck(cudaMemcpy(CT,dev_CT,PTlen_bits/8,cudaMemcpyDeviceToHost));
+    cudaDeviceSynchronize();
     block_t S;
     memset(S, 0, 16);
     ghash(H, AAD, AADlen_bits, S);
-
-    block_t ICB;
-    memcpy(ICB, J0, 16);
-    gcm_inc_counter(ICB);
-    gctr(RoundKey, ICB, PT, PTlen_bits, CT);
-    
     ghash(H, CT, PTlen_bits, S);
 
-    block_t len_block;
+    block_t len_block; 
     memset(len_block, 0, 16);
     uint64_t aad_len_bits_64 = AADlen_bits;
     uint64_t pt_len_bits_64 = PTlen_bits;
