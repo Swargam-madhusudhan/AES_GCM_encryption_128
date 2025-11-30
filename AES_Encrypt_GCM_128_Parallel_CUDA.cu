@@ -63,7 +63,8 @@ typedef byte state_t[4][4];
   * Source : https://csrc.nist.gov/Projects/cryptographic-algorithm-validation-program/cavp-testing-block-cipher-modes
   */
  
- 
+ #define NUM_STREAMS 4 // Number of concurrent streams
+#define ILP_FACTOR 4  // Process 4 blocks per thread
  #define AAD_LEN_BITS 	(160)
  #define AAD_LEN_BYTE 	(AAD_LEN_BITS/8)
  #define KEY_LEN_BITS  	(128)
@@ -426,59 +427,55 @@ void gctr(const byte* RoundKey, const block_t ICB, const byte* in, size_t len_bi
 
 // GCTR: AES-CTR mode encryption   Header TODO
 __global__
-void gctr_kernel( byte*  J0, const byte* PT, size_t num_blocks, byte* CT) {
+void gctr_kernel( byte*  J0, const byte* PT, size_t num_blocks, byte* CT,  int chunk_offset ) {
     
-     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
-        if (idx >= num_blocks) return;
+    int start_idx = (blockIdx.x * blockDim.x + threadIdx.x) * ILP_FACTOR;
+
+    byte base_J0[16];
+    #pragma unroll
+    for(int i=0; i<16; ++i) base_J0[i] = J0[i];
+
     byte ctr_block[16];
     byte enc_ctr_block[16];
-    
-    // --- CRITICAL: COUNTER CALCULATION ---
-    // 1. Copy J0 (which ends in 0...01)
-    for(int i=0; i<16; ++i) ctr_block[i] = J0[i];
-    
-    // 2. Extract the last 4 bytes as a big-endian integer
-    uint32_t val = (ctr_block[12] << 24) | 
-                   (ctr_block[13] << 16) | 
-                   (ctr_block[14] << 8)  | 
-                   ctr_block[15];
-    
-    // 3. Increment.
-    // Block 0 needs J0 + 1
-    // Block 1 needs J0 + 2
-    // Block idx needs J0 + 1 + idx
-    val += (idx + 1); 
-    
-    // 4. Write back as big-endian
-    ctr_block[12] = (val >> 24) & 0xFF;
-    ctr_block[13] = (val >> 16) & 0xFF;
-    ctr_block[14] = (val >> 8)  & 0xFF;
-    ctr_block[15] = (val)       & 0xFF;
-  // Encrypt
-    d_AES_encrypt_block(enc_ctr_block, ctr_block, d_RoundKey);
-          
-          
-    // --- XOR ---
-    // 
-   // for(int i=0; i<16; ++i) {
-       // CT[idx*16 + i] = PT[idx*16 + i] ^ enc_ctr_block[i];
 
-    
-    const ulong2* pt_ptr = reinterpret_cast<const ulong2*>(&PT[idx * 16]);
-    ulong2* ct_ptr       = reinterpret_cast<ulong2*>(&CT[idx * 16]);
+   for (int k = 0; k < ILP_FACTOR; ++k) {
+      int idx = start_idx + k;
+ 
 
-    
-    ulong2 pt_vec = *pt_ptr;
+      if (idx >= num_blocks) break;
 
-    ulong2 enc_vec = *reinterpret_cast<ulong2*>(enc_ctr_block);
+       #pragma unroll
+        for(int i=0; i<16; ++i) ctr_block[i] = base_J0[i];
+ 
+        uint32_t val = (base_J0[12] << 24) | 
+                       (base_J0[13] << 16) | 
+                       (base_J0[14] << 8)  | 
+                       base_J0[15];
+        
+        val += (chunk_offset + idx + 1); 
 
-    ulong2 res_vec;
-    res_vec.x = pt_vec.x ^ enc_vec.x; // XOR first 64 bits
-    res_vec.y = pt_vec.y ^ enc_vec.y; // XOR second 64 bits
+        // Update last 4 bytes
+        ctr_block[12] = (val >> 24) & 0xFF;
+        ctr_block[13] = (val >> 16) & 0xFF;
+        ctr_block[14] = (val >> 8)  & 0xFF;
+        ctr_block[15] = (val)       & 0xFF;
 
-    *ct_ptr = res_vec;
+      d_AES_encrypt_block(enc_ctr_block, ctr_block, d_RoundKey); 
+            
+      const ulong2* pt_ptr = reinterpret_cast<const ulong2*>(&PT[idx * 16]);
+      ulong2* ct_ptr       = reinterpret_cast<ulong2*>(&CT[idx * 16]);
 
+      
+      ulong2 pt_vec = *pt_ptr;
+
+      ulong2 enc_vec = *reinterpret_cast<ulong2*>(enc_ctr_block);
+
+      ulong2 res_vec;
+      res_vec.x = pt_vec.x ^ enc_vec.x; // XOR first 64 bits
+      res_vec.y = pt_vec.y ^ enc_vec.y; // XOR second 64 bits
+
+      *ct_ptr = res_vec;
+   }
 }
 
 
@@ -536,6 +533,7 @@ int aes_gcm_128_encrypt(
     byte* Tag,
     size_t Taglen_bytes
 ) {
+  int pt_len_bytes = PTlen_bits/8;
     byte RoundKey[176];
     KeyExpansion(RoundKey, Key); // Execute in the GPU if possible 
 
@@ -550,11 +548,7 @@ int aes_gcm_128_encrypt(
     byte h_J0[16]; 
     memcpy(h_J0, HardCoded_IV, 12); 
     h_J0[12]=0; h_J0[13]=0; h_J0[14]=0; h_J0[15]=1; 
-  
-int threads = 1024; 
-    int num_blocks = ((PTlen_bits/8) + 15) / 16;
-    int blocks = (num_blocks + threads - 1) / threads;
-    if (blocks == 0) blocks = 1;
+ 
     
     //byte* dev_RoundKey;
     byte* d_J0;
@@ -562,20 +556,65 @@ int threads = 1024;
     byte* dev_CT;
 
     cudaMalloc(&d_J0, 16);
-    wbCheck(cudaMemcpy(d_J0, h_J0,16,cudaMemcpyHostToDevice));
+    //wbCheck(cudaMemcpy(d_J0, h_J0,16,cudaMemcpyHostToDevice));
 
     wbCheck(cudaMalloc((void **)&dev_PT,PTlen_bits/8));
-    wbCheck(cudaMemcpy(dev_PT, PT,PTlen_bits/8,cudaMemcpyHostToDevice));
+    //wbCheck(cudaMemcpy(dev_PT, PT,PTlen_bits/8,cudaMemcpyHostToDevice));
 
     wbCheck(cudaMalloc((void **)&dev_CT,PTlen_bits/8));
+    
+    wbTime_start(Compute, "Performing CUDA computation");
+    wbCheck(cudaMemcpy(d_J0, h_J0,16,cudaMemcpyHostToDevice));
     cudaMemcpyToSymbol(d_sbox, sbox, 256);
     cudaMemcpyToSymbol(d_RoundKey, RoundKey, 176);
-    gctr_kernel<<<blocks, threads>>>(d_J0, dev_PT, num_blocks, dev_CT);
-    cudaDeviceSynchronize();
     
+    cudaStream_t streams[NUM_STREAMS];
+    for (int i = 0; i < NUM_STREAMS; ++i) cudaStreamCreate(&streams[i]);
+    
+    int chunk_size_bytes;
+    if (pt_len_bytes <= 16 * 1024) chunk_size_bytes = pt_len_bytes < 16 ? 16 : pt_len_bytes;
+    else if (pt_len_bytes <= 1024 * 1024) chunk_size_bytes = 16 * 1024;
+    else chunk_size_bytes = 1024 * 1024; 
+    
+    int total_chunks = (pt_len_bytes + chunk_size_bytes - 1) / chunk_size_bytes;
+    
+    //gctr_kernel<<<blocks, threads>>>(d_J0, dev_PT, num_blocks, dev_CT);
+    //cudaDeviceSynchronize();
+    printf("Processing %d bytes in %d chunks of %d bytes each.\n", pt_len_bytes, total_chunks, chunk_size_bytes);
+    for (int i = 0; i < total_chunks; ++i) {
+        int stream_id = i % NUM_STREAMS;
+        
+        // Calculate offsets and sizes for this chunk
+        int offset = i * chunk_size_bytes;
+        int current_bytes = (offset + chunk_size_bytes > pt_len_bytes) ? (pt_len_bytes - offset) : chunk_size_bytes;
+        int current_blocks = (current_bytes + 15) / 16;
+        int block_offset = offset / 16; // Start block index for this chunk (for counter)
 
-    wbCheck(cudaMemcpy(CT,dev_CT,PTlen_bits/8,cudaMemcpyDeviceToHost));
-    cudaDeviceSynchronize();
+        // Async Copy HostToDevice
+        cudaMemcpyAsync(&dev_PT[offset], &PT[offset], current_bytes, cudaMemcpyHostToDevice, streams[stream_id]);
+
+     
+        // Calculate grid size based on ILP
+        int threads_per_block = 256;
+        int threads_needed = (current_blocks + ILP_FACTOR - 1) / ILP_FACTOR;
+        int blocks = (threads_needed + threads_per_block - 1) / threads_per_block;
+        if(blocks == 0) blocks = 1;
+
+        gctr_kernel<<<blocks, threads_per_block, 0, streams[stream_id]>>>(
+            d_J0, 
+            &dev_PT[offset], 
+            current_blocks,
+            &dev_CT[offset],
+            block_offset // Pass offset so kernel knows the correct counter value
+        );
+
+        //Async Copy DeviceToHost
+        cudaMemcpyAsync(&CT[offset], &dev_CT[offset], current_bytes, cudaMemcpyDeviceToHost, streams[stream_id]);
+    }
+    
+    for (int i = 0; i < NUM_STREAMS; ++i) cudaStreamSynchronize(streams[i]);
+    
+    wbTime_stop(Compute, "Performing CUDA computation");
     block_t S;
     memset(S, 0, 16);
     ghash(H, AAD, AADlen_bits, S);
@@ -636,7 +675,7 @@ int main(int argc, char *argv[]) {
   // Launching Sequential
   // ----------------------------------------------------------
   wbLog(TRACE, "Launching Sequential computation");
-  wbTime_start(Compute, "Performing CUDA computation");
+  //wbTime_start(Compute, "Performing CUDA computation");
   //@@ Perform Sequential computation here
   aes_gcm_128_encrypt(
                       HardCoded_Key,
@@ -649,7 +688,7 @@ int main(int argc, char *argv[]) {
                       TAG, 
                       TAG_LEN
   );
-  wbTime_stop(Compute, "Performing CUDA computation");
+  //wbTime_stop(Compute, "Performing CUDA computation");
 
 #if DEBUG_ENABLE
 	printf("\n\n Calculated Cipher Data : \n");
