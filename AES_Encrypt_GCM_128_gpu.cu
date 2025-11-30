@@ -590,8 +590,11 @@ void gctr(const byte *RoundKey, const block_t ICB, const byte *in, size_t len_bi
 
     int threadsPerBlock = 128;
     int blocksPerGrid = (total_blocks + threadsPerBlock - 1) / threadsPerBlock;
+    wbTime_start(Compute, "Performing CUDA computation");
 
     gctr_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_in, d_out, d_roundKey, d_icb, len_bits);
+    wbTime_stop(Compute, "Performing CUDA computation");
+
     cudaDeviceSynchronize();
 
     cudaMemcpy(out, d_out, total_bytes, cudaMemcpyDeviceToHost);
@@ -682,7 +685,11 @@ int aes_gcm_128_encrypt(
     block_t ICB;
     memcpy(ICB, J0, 16);
     gcm_inc_counter(ICB);
+    // wbTime_start(Compute, "Performing CUDA computation");
+
     gctr(RoundKey, ICB, PT, PTlen_bits, CT);
+
+    // wbTime_stop(Compute, "Performing CUDA computation");
 
     ghash(H, CT, PTlen_bits, S);
 
@@ -743,7 +750,7 @@ int main(int argc, char *argv[])
     // Launching Sequential
     // ----------------------------------------------------------
     wbLog(TRACE, "Launching GPU computation");
-    wbTime_start(Compute, "Performing CUDA computation");
+    // wbTime_start(Compute, "Performing CUDA computation");
     //@@ Perform Sequential computation here
     aes_gcm_128_encrypt(
         HardCoded_Key,
@@ -755,7 +762,7 @@ int main(int argc, char *argv[])
         CT,
         TAG,
         TAG_LEN);
-    wbTime_stop(Compute, "Performing CUDA computation");
+    // wbTime_stop(Compute, "Performing CUDA computation");
 
 #if DEBUG_ENABLE
     printf("\n\n Calculated Cipher Data : \n");

@@ -513,7 +513,12 @@ int aes_gcm_256_encrypt(
     block_t ICB;
     memcpy(ICB, J0, 16);
     gcm_inc_counter(ICB);
+
+    wbTime_start(Compute, "Performing CUDA computation");
+
     gctr(RoundKey, ICB, PT, PTlen_bits, CT);
+
+    wbTime_start(Compute, "Performing CUDA computation");
 
     ghash(H, CT, PTlen_bits, S);
 
@@ -574,7 +579,7 @@ int main(int argc, char *argv[])
     // Launching Sequential
     // ----------------------------------------------------------
     wbLog(TRACE, "Launching Sequential computation");
-    wbTime_start(Compute, "Performing CUDA computation");
+    // wbTime_start(Compute, "Performing CUDA computation");
     //@@ Perform Sequential computation here
     aes_gcm_256_encrypt(
         HardCoded_Key,
@@ -586,7 +591,7 @@ int main(int argc, char *argv[])
         CT,
         TAG,
         TAG_LEN);
-    wbTime_stop(Compute, "Performing CUDA computation");
+    // wbTime_stop(Compute, "Performing CUDA computation");
 
 #if DEBUG_ENABLE
     printf("\n\n Calculated Cipher Data : \n");

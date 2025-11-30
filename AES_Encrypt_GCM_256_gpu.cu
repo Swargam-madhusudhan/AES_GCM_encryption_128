@@ -64,39 +64,37 @@ typedef byte state_t[4][4];
  * Source : https://csrc.nist.gov/Projects/cryptographic-algorithm-validation-program/cavp-testing-block-cipher-modes
  */
 
- 
- #define AAD_LEN_BITS 	(160)
- #define AAD_LEN_BYTE 	(AAD_LEN_BITS/8)
- #define KEY_LEN_BITS  	(256)
- #define KEY_LEN_BYTE 	(KEY_LEN_BITS/8)
- #define IV_LEN_BITS	(96)
- #define IV_LEN_BYTE	(IV_LEN_BITS/8)
- #define TAG_LEN		(16)
+#define AAD_LEN_BITS (160)
+#define AAD_LEN_BYTE (AAD_LEN_BITS / 8)
+#define KEY_LEN_BITS (256)
+#define KEY_LEN_BYTE (KEY_LEN_BITS / 8)
+#define IV_LEN_BITS (96)
+#define IV_LEN_BYTE (IV_LEN_BITS / 8)
+#define TAG_LEN (16)
 //  byte HardCoded_Key[KEY_LEN_BYTE] = {0x87, 0xf9,0x6a, 0x86,
 // 									 0x40, 0x4a, 0x2c, 0x79,
 // 									 0x3b, 0x26, 0xd7, 0xe1,
-// 									 0x2c, 0x5a, 0xaf,0xfa}; // 16 bytes - 128bits 
+// 									 0x2c, 0x5a, 0xaf,0xfa}; // 16 bytes - 128bits
 
- byte HardCoded_Key[KEY_LEN_BYTE] = {   0x83, 0x68, 0x8d, 0xeb,
-                                        0x4a, 0xf8, 0x00, 0x7f,
-                                        0x9b, 0x71, 0x3b, 0x47,
-                                        0xcf, 0xa6, 0xc7, 0x3e,
-                                        0x35, 0xea, 0x7a, 0x3a,
-                                        0xa4, 0xec, 0xdb, 0x41,
-                                        0x4d, 0xde, 0xd0, 0x3b,
-                                        0xf7, 0xa0, 0xfd, 0x3a};
-                                        
+byte HardCoded_Key[KEY_LEN_BYTE] = {0x83, 0x68, 0x8d, 0xeb,
+                                    0x4a, 0xf8, 0x00, 0x7f,
+                                    0x9b, 0x71, 0x3b, 0x47,
+                                    0xcf, 0xa6, 0xc7, 0x3e,
+                                    0x35, 0xea, 0x7a, 0x3a,
+                                    0xa4, 0xec, 0xdb, 0x41,
+                                    0x4d, 0xde, 0xd0, 0x3b,
+                                    0xf7, 0xa0, 0xfd, 0x3a};
+
 //  byte HardCoded_IV[IV_LEN_BYTE] = {0x5c, 0x66, 0x99, 0x38,
 // 									0x1a, 0x93, 0x60, 0xec,
 // 									0x83, 0xdd, 0x98, 0xdc}; // 12 bytes - 96 bits
 
-byte HardCoded_IV[IV_LEN_BYTE] = {  0x0b, 0x45, 0x97, 0x24,
-                                    0x90, 0x4e, 0x01, 0x0a,
-                                    0x46, 0x90, 0x1c, 0xf3};
-                                    // 0x00, 0x00,0x00, 0x00
-                                    // 0x00, 0x00,0x00, 0x00,
-                                    // 0x00, 0x00,0x00, 0x00};
-
+byte HardCoded_IV[IV_LEN_BYTE] = {0x0b, 0x45, 0x97, 0x24,
+                                  0x90, 0x4e, 0x01, 0x0a,
+                                  0x46, 0x90, 0x1c, 0xf3};
+// 0x00, 0x00,0x00, 0x00
+// 0x00, 0x00,0x00, 0x00,
+// 0x00, 0x00,0x00, 0x00};
 
 //  byte HardCoded_AAD[AAD_LEN_BYTE] = {0xf8, 0x90, 0x16, 0xb2,
 // 									 0x6c, 0xea, 0x39, 0xea,
@@ -108,8 +106,7 @@ byte HardCoded_AAD[AAD_LEN_BYTE] = {0x79, 0x4a, 0x14, 0xcc,
                                     0xd1, 0x78, 0xc8, 0xeb,
                                     0xfd, 0x13, 0x79, 0xdc,
                                     0x70, 0x4c, 0x5e, 0x20,
-                                    0x8f, 0x9d, 0x84, 0x24};//20 bytes - 160 bytes
-
+                                    0x8f, 0x9d, 0x84, 0x24}; // 20 bytes - 160 bytes
 
 /*
  * SUBBYTES uses substitution table called as S-box.
@@ -168,10 +165,9 @@ static const byte Rcon[11] = {
  *
  *
  */
-#define Nr		14	//	The number of rounds.
-#define Nk 		8	//	The number of 32-bit words comprising the key
-#define Nb 		4	//	The number of columns comprising the state
-
+#define Nr 14 //	The number of rounds.
+#define Nk 8  //	The number of 32-bit words comprising the key
+#define Nb 4  //	The number of columns comprising the state
 
 /*
  * 5.1.1 SUBBYTES() is an invertible, non-linear transformation of
@@ -370,7 +366,7 @@ void KeyExpansion(byte RoundKey[240], const byte Key[32])
             temp[1] = temp[2];
             temp[2] = temp[3];
             temp[3] = u;
-        
+
             /* Substitute the S box word */
             temp[0] = sbox[temp[0]];
             temp[1] = sbox[temp[1]];
@@ -402,7 +398,8 @@ void KeyExpansion(byte RoundKey[240], const byte Key[32])
  *
  * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
  */
-void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[240]) {
+void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[240])
+{
     state_t state_buf;
     state_t *s = &state_buf;
     for (int i = 0; i < 4; ++i)
@@ -624,7 +621,12 @@ void gctr(const byte *RoundKey, const block_t ICB, const byte *in, size_t len_bi
     int threadsPerBlock = 128;
     int blocksPerGrid = (total_blocks + threadsPerBlock - 1) / threadsPerBlock;
 
+    wbTime_start(Compute, "Performing CUDA computation");
+
     gctr_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_in, d_out, d_roundKey, d_icb, len_bits);
+
+    wbTime_start(Compute, "Performing CUDA computation");
+
     cudaDeviceSynchronize();
 
     cudaMemcpy(out, d_out, total_bytes, cudaMemcpyDeviceToHost);
@@ -686,14 +688,14 @@ void ghash(const block_t H, const byte *X, size_t len_bits, block_t S)
 int aes_gcm_256_encrypt(
     const byte Key[32],
     const byte IV[12],
-    const byte* PT,
+    const byte *PT,
     size_t PTlen_bits,
-    const byte* AAD,
+    const byte *AAD,
     size_t AADlen_bits,
-    byte* CT,
-    byte* Tag,
-    size_t Taglen_bytes
-) {
+    byte *CT,
+    byte *Tag,
+    size_t Taglen_bytes)
+{
     byte RoundKey[240];
     KeyExpansion(RoundKey, Key);
 
@@ -776,9 +778,9 @@ int main(int argc, char *argv[])
     // Launching Sequential
     // ----------------------------------------------------------
     wbLog(TRACE, "Launching GPU computation");
-    wbTime_start(Compute, "Performing CUDA computation");
+    // wbTime_start(Compute, "Performing CUDA computation");
     //@@ Perform Sequential computation here
-  aes_gcm_256_encrypt(
+    aes_gcm_256_encrypt(
         HardCoded_Key,
         HardCoded_IV,
         PT,
@@ -788,7 +790,7 @@ int main(int argc, char *argv[])
         CT,
         TAG,
         TAG_LEN);
-    wbTime_stop(Compute, "Performing CUDA computation");
+    // wbTime_stop(Compute, "Performing CUDA computation");
 
 #if DEBUG_ENABLE
     printf("\n\n Calculated Cipher Data : \n");
