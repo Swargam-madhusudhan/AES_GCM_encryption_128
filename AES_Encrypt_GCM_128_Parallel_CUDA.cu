@@ -63,8 +63,7 @@ typedef byte state_t[4][4];
   * Source : https://csrc.nist.gov/Projects/cryptographic-algorithm-validation-program/cavp-testing-block-cipher-modes
   */
  
- #define NUM_STREAMS 4 // Number of concurrent streams
-#define ILP_FACTOR 4  // Process 4 blocks per thread
+ #define NUM_STREAMS 8 // Number of concurrent streams  
  #define AAD_LEN_BITS 	(160)
  #define AAD_LEN_BYTE 	(AAD_LEN_BITS/8)
  #define KEY_LEN_BITS  	(128)
@@ -145,7 +144,9 @@ static const byte Rcon[11] = {
  */
 
 void SubBytes(state_t* state) {
+   #pragma unroll
     for (int i = 0; i < 4; ++i) {
+        #pragma unroll
         for (int j = 0; j < 4; ++j) {
             (*state)[j][i] = sbox[(*state)[j][i]];
         }
@@ -154,7 +155,9 @@ void SubBytes(state_t* state) {
 
 __device__
 void d_SubBytes(state_t* state) {
+    #pragma unroll
     for (int i = 0; i < 4; ++i) {
+        #pragma unroll
         for (int j = 0; j < 4; ++j) {
             (*state)[j][i] = d_sbox[(*state)[j][i]];
         }
@@ -170,7 +173,9 @@ void d_SubBytes(state_t* state) {
  */
  __host__ __device__
  void AddRoundKey(byte round, state_t* state, const byte* RoundKey) {
+ #pragma unroll
     for (int i = 0; i < 4; ++i) {
+    #pragma unroll
         for (int j = 0; j < 4; ++j) {
             (*state)[j][i] ^= RoundKey[round * Nb * 4 + i * Nb + j];
         }
@@ -218,6 +223,7 @@ byte xtime(byte x) {
  __host__ __device__
 void MixColumns(state_t* state) {
     byte a, b, c, d;
+    #pragma unroll
     for (int i = 0; i < 4; ++i) {
         a = (*state)[0][i];
         b = (*state)[1][i];
@@ -297,12 +303,14 @@ void MixColumns(state_t* state) {
 void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) {
     state_t state_buf;
     state_t* s = &state_buf;
+    #pragma unroll
     for(int i=0; i<4; ++i) {
         for(int j=0; j<4; ++j) {
             (*s)[j][i] = in[i*4 + j];
         }
     }
     AddRoundKey(0, s, RoundKey);
+    #pragma unroll
     for (int round = 1; round < Nr; ++round) {
         SubBytes(s);
         ShiftRows(s);
@@ -312,6 +320,7 @@ void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) 
     SubBytes(s);
     ShiftRows(s);
     AddRoundKey(Nr, s, RoundKey);
+    #pragma unroll
     for(int i=0; i<4; ++i) {
         for(int j=0; j<4; ++j) {
             out[i*4 + j] = (*s)[j][i];
@@ -429,53 +438,49 @@ void gctr(const byte* RoundKey, const block_t ICB, const byte* in, size_t len_bi
 __global__
 void gctr_kernel( byte*  J0, const byte* PT, size_t num_blocks, byte* CT,  int chunk_offset ) {
     
-    int start_idx = (blockIdx.x * blockDim.x + threadIdx.x) * ILP_FACTOR;
+    int blk_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    byte base_J0[16];
-    #pragma unroll
-    for(int i=0; i<16; ++i) base_J0[i] = J0[i];
+    if (blk_idx >= num_blocks) return;
 
-    byte ctr_block[16];
+    // Load 16 bytes PT data
+    const uint4* pt_ptr_128 = reinterpret_cast<const uint4*>(PT);
+    uint4 pt_vec = pt_ptr_128[blk_idx]; 
+
+    // Load J0 (IV)
+    const uint32_t* j0_ptr = (const uint32_t*)J0;
+    uint32_t iv_w0 = j0_ptr[0];
+    uint32_t iv_w1 = j0_ptr[1];
+    uint32_t iv_w2 = j0_ptr[2];
+    uint32_t iv_cnt = j0_ptr[3];
+
+    uint32_t initial_counter = __byte_perm(iv_cnt, 0, 0x0123); // Swap to Little Endian
+    uint32_t current_val = initial_counter + chunk_offset + blk_idx + 1;
+    uint32_t ctr_be = __byte_perm(current_val, 0, 0x0123);     // Swap back to Big Endian
+
+
+    // construct the block in 
+    byte ctr_block_local[16];
+    ((uint32_t*)ctr_block_local)[0] = iv_w0;
+    ((uint32_t*)ctr_block_local)[1] = iv_w1;
+    ((uint32_t*)ctr_block_local)[2] = iv_w2;
+    ((uint32_t*)ctr_block_local)[3] = ctr_be;
+
     byte enc_ctr_block[16];
+    d_AES_encrypt_block(enc_ctr_block, ctr_block_local, d_RoundKey);
 
-   for (int k = 0; k < ILP_FACTOR; ++k) {
-      int idx = start_idx + k;
- 
 
-      if (idx >= num_blocks) break;
+    uint4 enc_vec = *reinterpret_cast<uint4*>(enc_ctr_block);
+    
+    uint4 result_vec;
+    result_vec.x = pt_vec.x ^ enc_vec.x;
+    result_vec.y = pt_vec.y ^ enc_vec.y;
+    result_vec.z = pt_vec.z ^ enc_vec.z;
+    result_vec.w = pt_vec.w ^ enc_vec.w;
 
-       #pragma unroll
-        for(int i=0; i<16; ++i) ctr_block[i] = base_J0[i];
- 
-        uint32_t val = (base_J0[12] << 24) | 
-                       (base_J0[13] << 16) | 
-                       (base_J0[14] << 8)  | 
-                       base_J0[15];
-        
-        val += (chunk_offset + idx + 1); 
+    // Store directly as uint4
+    uint4* ct_ptr_128 = reinterpret_cast<uint4*>(CT);
+    ct_ptr_128[blk_idx] = result_vec;
 
-        // Update last 4 bytes
-        ctr_block[12] = (val >> 24) & 0xFF;
-        ctr_block[13] = (val >> 16) & 0xFF;
-        ctr_block[14] = (val >> 8)  & 0xFF;
-        ctr_block[15] = (val)       & 0xFF;
-
-      d_AES_encrypt_block(enc_ctr_block, ctr_block, d_RoundKey); 
-            
-      const ulong2* pt_ptr = reinterpret_cast<const ulong2*>(&PT[idx * 16]);
-      ulong2* ct_ptr       = reinterpret_cast<ulong2*>(&CT[idx * 16]);
-
-      
-      ulong2 pt_vec = *pt_ptr;
-
-      ulong2 enc_vec = *reinterpret_cast<ulong2*>(enc_ctr_block);
-
-      ulong2 res_vec;
-      res_vec.x = pt_vec.x ^ enc_vec.x; // XOR first 64 bits
-      res_vec.y = pt_vec.y ^ enc_vec.y; // XOR second 64 bits
-
-      *ct_ptr = res_vec;
-   }
 }
 
 
@@ -569,18 +574,81 @@ int aes_gcm_128_encrypt(
     cudaMemcpyToSymbol(d_RoundKey, RoundKey, 176);
     
     cudaStream_t streams[NUM_STREAMS];
+
     for (int i = 0; i < NUM_STREAMS; ++i) cudaStreamCreate(&streams[i]);
     
-    int chunk_size_bytes;
-    if (pt_len_bytes <= 16 * 1024) chunk_size_bytes = pt_len_bytes < 16 ? 16 : pt_len_bytes;
-    else if (pt_len_bytes <= 1024 * 1024) chunk_size_bytes = 16 * 1024;
-    else chunk_size_bytes = 1024 * 1024; 
+    int target_chunk_size;
     
+    if (pt_len_bytes <= 16 * 1024) {
+        // For small files, just do it in one go (or force alignment if you split)
+        target_chunk_size = pt_len_bytes; 
+    } else if (pt_len_bytes <= 1024 * 1024) {
+        // Medium files: 256KB chunks
+        target_chunk_size = 16 * 1024;
+    } else {
+        // Large files: 1MB chunks
+        target_chunk_size = 1024 * 1024; 
+    }
+
+    //Force Alignment to 16 Bytes
+    
+    int  chunk_size_bytes = ((target_chunk_size + 15) / 16) * 16;
+
+    //Recalculate Total Chunks
     int total_chunks = (pt_len_bytes + chunk_size_bytes - 1) / chunk_size_bytes;
     
     //gctr_kernel<<<blocks, threads>>>(d_J0, dev_PT, num_blocks, dev_CT);
     //cudaDeviceSynchronize();
     printf("Processing %d bytes in %d chunks of %d bytes each.\n", pt_len_bytes, total_chunks, chunk_size_bytes);
+    
+    
+    /*for (int i = 0; i < total_chunks; ++i) {
+        int stream_id = i; 
+        
+        int offset = i * chunk_size_bytes;
+     
+        int current_bytes = (offset + chunk_size_bytes > pt_len_bytes) ? 
+                            (pt_len_bytes - offset) : chunk_size_bytes;
+        
+        wbCheck(cudaMemcpyAsync(&dev_PT[offset], &PT[offset], current_bytes, 
+                                cudaMemcpyHostToDevice, streams[stream_id]));
+    }
+
+    for (int i = 0; i < total_chunks; ++i) {
+        int stream_id = i;
+
+        int offset = i * chunk_size_bytes;
+        int current_bytes = (offset + chunk_size_bytes > pt_len_bytes) ? 
+                            (pt_len_bytes - offset) : chunk_size_bytes;
+        
+        int current_blocks = (current_bytes + 15) / 16;
+        int block_offset = offset / 16; 
+
+        //  Grid Calculation
+        int threads_per_block = 128;
+        int threads_needed = current_blocks;
+        int blocks = (threads_needed + threads_per_block - 1) / threads_per_block;
+        if(blocks == 0) blocks = 1;
+
+        gctr_kernel<<<blocks, threads_per_block, 0, streams[stream_id]>>>(
+            d_J0, 
+            &dev_PT[offset], 
+            current_blocks,
+            &dev_CT[offset],
+            block_offset
+        );
+    }
+
+    for (int i = 0; i < total_chunks; ++i) {
+        int stream_id = i;
+
+        int offset = i * chunk_size_bytes;
+        int current_bytes = (offset + chunk_size_bytes > pt_len_bytes) ? 
+                            (pt_len_bytes - offset) : chunk_size_bytes;
+
+        wbCheck(cudaMemcpyAsync(&CT[offset], &dev_CT[offset], current_bytes, 
+                                cudaMemcpyDeviceToHost, streams[stream_id]));
+    }*/
     for (int i = 0; i < total_chunks; ++i) {
         int stream_id = i % NUM_STREAMS;
         
@@ -595,8 +663,8 @@ int aes_gcm_128_encrypt(
 
      
         // Calculate grid size based on ILP
-        int threads_per_block = 256;
-        int threads_needed = (current_blocks + ILP_FACTOR - 1) / ILP_FACTOR;
+        int threads_per_block = 128;
+        int threads_needed = current_blocks;
         int blocks = (threads_needed + threads_per_block - 1) / threads_per_block;
         if(blocks == 0) blocks = 1;
 
@@ -605,7 +673,7 @@ int aes_gcm_128_encrypt(
             &dev_PT[offset], 
             current_blocks,
             &dev_CT[offset],
-            block_offset // Pass offset so kernel knows the correct counter value
+            block_offset 
         );
 
         //Async Copy DeviceToHost
@@ -653,7 +721,7 @@ int main(int argc, char *argv[]) {
   wbTime_stop(Generic, "Importing data and creating memory on host");
   
   // Convert float WbImport data to uint8 data for calculation
-  PT = (uint8_t *)malloc(PT_Len * sizeof(byte));
+  cudaMallocHost((void**)&PT,PT_Len * sizeof(byte));
   for (int i = 0; i < PT_Len; i++) { 
     PT[i] = (uint8_t)vec[i];
   }
@@ -668,8 +736,8 @@ int main(int argc, char *argv[]) {
 
   wbLog(TRACE, "The input length is ", PT_Len);
   printf(" \n\n The PT length is %d \n", PT_Len);
-  CT = (byte *)malloc (PT_Len * sizeof(byte));
-  TAG = (byte *)malloc(TAG_LEN * sizeof(byte));
+  cudaMallocHost ((void**)&CT, PT_Len * sizeof(byte));
+  cudaMallocHost((void**)&TAG, TAG_LEN * sizeof(byte));
 
 
   // Launching Sequential
@@ -709,9 +777,9 @@ int main(int argc, char *argv[]) {
   wbSolution(args, CT_float, PT_Len);
 
   // Free the memory
-  free(CT);
-  free(PT);
-  free(TAG);
+  cudaFreeHost(CT);
+  cudaFreeHost(PT);
+  cudaFreeHost(TAG);
   free(CT_float);
   
   //Return Success
