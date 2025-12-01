@@ -1,10 +1,19 @@
 /**
- * @file AES_Encryption_GCM_Mode.cu
- * @brief AES encryption 128 Sequence code evaluation.
- *
- * 
- * 
- *
+ * @file AES_Encrypt_GCM_128_Parallel_CUDA.cu
+ * @brief AES encryption 128 CUDA parallelization
+ * CUDA Methods Used
+ *     -> Cuda regular implementation
+ *			-> Degrade in performance after regular implementation
+ *     -> Optimization Techniques
+ *			-> Cuda Stream to achieve parallel memcpy to device, kernel execution and memcpy to host
+ *			-> Pinned Memory
+ *			-> Memory Coalescing cuda
+ *		-> Cuda Tools used for analysis
+ * 			-> nvvp
+ * Algorithm improvements
+ *       -> AES T Table technique to combine 
+ * Improvements achieved:
+ *        -> Todo Update values
  * @Author: Madhusudhan Swargam <mswargam@oakland.edu>
  *          Prathiksha Chikkamadal Manjunatha <pchikkamadalman@oakland.edu>
  * @date 2025-Nov
