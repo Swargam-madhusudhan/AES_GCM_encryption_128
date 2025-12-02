@@ -1,21 +1,29 @@
 /**
  * @file AES_Encrypt_GCM_128_Parallel_CUDA.cu
+ *
  * @brief AES encryption 128 CUDA parallelization
  * CUDA Methods Used
  *     -> Cuda regular implementation
- *			-> Degrade in performance after regular implementation
+ *        -> Degrade in performance after regular CUDA implementation
+ *
  *     -> Optimization Techniques
- *			-> Cuda Stream to achieve parallel memcpy to device, kernel execution and memcpy to host
- *			-> Pinned Memory
- *			-> Memory Coalescing cuda
+ *			  -> Cuda Stream to achieve parallel memcpy to device, kernel execution and memcpy to host
+ *			  -> Pinned Memory
+ *			  -> Memory Coalescing(Lecture 6: Memory Access Performance) 
+ *        -> Shared Memory Caching 
+ *        -> Vectorized Memory Access(https://developer.nvidia.com/blog/cuda-pro-tip-increase-performance-with-vectorized-memory-access/)
+ *
  *		-> Cuda Tools used for analysis
- * 			-> nvvp
+ * 			  -> nvvp
  * Algorithm improvements
- *       -> AES T Table technique to combine 
+ *        -> AES T Table technique for faster encryption
  * Improvements achieved:
  *        -> Todo Update values
+ *
  * @Author: Madhusudhan Swargam <mswargam@oakland.edu>
  *          Prathiksha Chikkamadal Manjunatha <pchikkamadalman@oakland.edu>
+ * Source : Algorithm SOurce code reference :
+ *            https://web.mit.edu/freebsd/head/contrib/wpa/src/crypto/aes-gcm.c
  * @date 2025-Nov
  * @copyright
  */
@@ -39,8 +47,6 @@
   */
 
 typedef uint8_t byte;
-
-
 typedef byte block_t[16];
 
  /*
@@ -49,10 +55,7 @@ typedef byte block_t[16];
  */
 typedef byte state_t[4][4];
 
-#define AES_BLOCK_SIZE	16 // 128 bits - 8 bytes
-#define AES_KEY_SIZE	16 // 126 bit AES Key
-#define AES_NO_ROUNDS	10 // 10 rounds for 128 bit key
-  
+
  /* 
   *
   * Hardcoded values for Project demonstration
@@ -71,31 +74,36 @@ typedef byte state_t[4][4];
   * Tag = c3a2481fc31a33b46c6b64041d5d
   * Source : https://csrc.nist.gov/Projects/cryptographic-algorithm-validation-program/cavp-testing-block-cipher-modes
   */
- 
- #define NUM_STREAMS 8 // Number of concurrent streams  
- #define AAD_LEN_BITS 	(160)
- #define AAD_LEN_BYTE 	(AAD_LEN_BITS/8)
- #define KEY_LEN_BITS  	(128)
- #define KEY_LEN_BYTE 	(KEY_LEN_BITS/8)
- #define IV_LEN_BITS	(96)
- #define IV_LEN_BYTE	(IV_LEN_BITS/8)
- #define TAG_LEN		(14)
+#define AES_BLOCK_SIZE    (16)              // 128 bits - 8 bytes
+#define AES_KEY_SIZE	    (16)              // 126 bit AES Key
+#define AES_NO_ROUNDS	    (10)              // 10 rounds for 128 bit key
+#define NUM_STREAMS       (8)               // Number of concurrent streams  
+#define AAD_LEN_BITS 	    (160)             // Hardcoded value for this algorithm
+#define AAD_LEN_BYTE 	    (AAD_LEN_BITS/8)
+#define KEY_LEN_BITS      (128)
+#define KEY_LEN_BYTE 	    (KEY_LEN_BITS/8)
+#define IV_LEN_BITS	      (96)
+#define IV_LEN_BYTE	      (IV_LEN_BITS/8)
+#define TAG_LEN		        (14)
+
+/* AES 128 values */
+#define Nr		            10	  //	The number of rounds.
+#define Nk 		            4	    //	The number of 32-bit words comprising the key
+#define Nb 		            4	    //	The number of columns comprising the state
  byte HardCoded_Key[KEY_LEN_BYTE] = {0x87, 0xf9,0x6a, 0x86,
-									 0x40, 0x4a, 0x2c, 0x79,
-									 0x3b, 0x26, 0xd7, 0xe1,
-									 0x2c, 0x5a, 0xaf,0xfa}; // 16 bytes - 128bits 
+                                     0x40, 0x4a, 0x2c, 0x79,
+                                     0x3b, 0x26, 0xd7, 0xe1,
+                                     0x2c, 0x5a, 0xaf,0xfa}; // 16 bytes - 128bits 
  byte HardCoded_IV[IV_LEN_BYTE] = {0x5c, 0x66, 0x99, 0x38,
-									0x1a, 0x93, 0x60, 0xec,
-									0x83, 0xdd, 0x98, 0xdc}; // 12 bytes - 96 bits
+                                    0x1a, 0x93, 0x60, 0xec,
+                                    0x83, 0xdd, 0x98, 0xdc}; // 12 bytes - 96 bits
 
  byte HardCoded_AAD[AAD_LEN_BYTE] = {0xf8, 0x90, 0x16, 0xb2,
-									 0x6c, 0xea, 0x39, 0xea,
-									 0x38, 0xa0, 0x38, 0xa0,
-									 0xf1, 0x8a, 0xf5, 0x3f,
-									 0x72, 0xf7, 0xfd, 0x17};//20 bytes - 160 bytes
+                                     0x6c, 0xea, 0x39, 0xea,
+                                     0x38, 0xa0, 0x38, 0xa0,
+                                     0xf1, 0x8a, 0xf5, 0x3f,
+                                     0x72, 0xf7, 0xfd, 0x17};//20 bytes - 160 bytes
 
- __constant__ byte d_sbox[256];
-  __constant__ byte d_RoundKey[176];
  /*
   * SUBBYTES uses substitution table called as S-box.
   *
@@ -120,10 +128,6 @@ typedef byte state_t[4][4];
     0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 };
 
-
-//TODO used reference as https://web.mit.edu/freebsd/head/contrib/wpa/src/crypto/aes-gcm.c
-
-
  /*
   * KEYEXPANSION  invokes 10 fxed words denoted by Rcon Round Constants.
   *
@@ -133,16 +137,15 @@ static const byte Rcon[11] = {
     0x8d, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36
 };
 
-/*
- *	Algorithm Parameters
- *
- *
- */
-#define Nr		10	//	The number of rounds.
-#define Nk 		4	//	The number of 32-bit words comprising the key
-#define Nb 		4	//	The number of columns comprising the state
+
+/* Global data */
+__constant__ byte d_RoundKey[176];        // Key Roundkey used by AES encryption
+uint32_t *d_Te0, *d_Te1, *d_Te2, *d_Te3;  // T Table optimization used for faster AES implementation
+byte *d_GlobalSbox; // S-Box in Global Memory
 
 
+/********************* Algorithm Helper Functions **********************************/
+ 
 /*
  * 5.1.1 SUBBYTES() is an invertible, non-linear transformation of 
  * the state in which a substitution table, called an S-box,
@@ -153,22 +156,9 @@ static const byte Rcon[11] = {
  */
 
 void SubBytes(state_t* state) {
-   #pragma unroll
     for (int i = 0; i < 4; ++i) {
-        #pragma unroll
         for (int j = 0; j < 4; ++j) {
             (*state)[j][i] = sbox[(*state)[j][i]];
-        }
-    }
-}
-
-__device__
-void d_SubBytes(state_t* state) {
-    #pragma unroll
-    for (int i = 0; i < 4; ++i) {
-        #pragma unroll
-        for (int j = 0; j < 4; ++j) {
-            (*state)[j][i] = d_sbox[(*state)[j][i]];
         }
     }
 }
@@ -182,9 +172,7 @@ void d_SubBytes(state_t* state) {
  */
  __host__ __device__
  void AddRoundKey(byte round, state_t* state, const byte* RoundKey) {
- #pragma unroll
     for (int i = 0; i < 4; ++i) {
-    #pragma unroll
         for (int j = 0; j < 4; ++j) {
             (*state)[j][i] ^= RoundKey[round * Nb * 4 + i * Nb + j];
         }
@@ -312,14 +300,12 @@ void MixColumns(state_t* state) {
 void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) {
     state_t state_buf;
     state_t* s = &state_buf;
-    #pragma unroll
     for(int i=0; i<4; ++i) {
         for(int j=0; j<4; ++j) {
             (*s)[j][i] = in[i*4 + j];
         }
     }
     AddRoundKey(0, s, RoundKey);
-    #pragma unroll
     for (int round = 1; round < Nr; ++round) {
         SubBytes(s);
         ShiftRows(s);
@@ -329,41 +315,12 @@ void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) 
     SubBytes(s);
     ShiftRows(s);
     AddRoundKey(Nr, s, RoundKey);
-    #pragma unroll
     for(int i=0; i<4; ++i) {
         for(int j=0; j<4; ++j) {
             out[i*4 + j] = (*s)[j][i];
         }
     }
 }
-
-
-__device__
-void d_AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) {
-    state_t state_buf;
-    state_t* s = &state_buf;
-    for(int i=0; i<4; ++i) {
-        for(int j=0; j<4; ++j) {
-            (*s)[j][i] = in[i*4 + j];
-        }
-    }
-    AddRoundKey(0, s, RoundKey);
-    for (int round = 1; round < Nr; ++round) {
-        d_SubBytes(s);
-        ShiftRows(s);
-        MixColumns(s);
-        AddRoundKey(round, s, RoundKey);
-    }
-    d_SubBytes(s);
-    ShiftRows(s);
-    AddRoundKey(Nr, s, RoundKey);
-    for(int i=0; i<4; ++i) {
-        for(int j=0; j<4; ++j) {
-            out[i*4 + j] = (*s)[j][i];
-        }
-    }
-}
-
 
 /*
  * TODO 6.3 Multiplication Operation on Blocks 
@@ -372,8 +329,6 @@ for the binary Galois (finite) field of 2128 elements
  *
  * Source : https://csrc.nist.rip/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-revised-spec.pdf TODO
  */
-
-
 
 // GCM GF(2^128) multiplication  Header TODO
 void gcm_gf_mult(const block_t x, const block_t y, block_t z) {
@@ -442,55 +397,216 @@ void gctr(const byte* RoundKey, const block_t ICB, const byte* in, size_t len_bi
     }
 }
 
+/*  AES T-Table optimization technique functions 
+ *
+ * T-Table are precomputed MixColumn and ShiftRows operations.
+ * It increases the computation speed of AES encryption.
+ *
+ */
 
-// GCTR: AES-CTR mode encryption   Header TODO
-__global__
-void gctr_kernel( byte*  J0, const byte* PT, size_t num_blocks, byte* CT,  int chunk_offset ) {
-    
+byte gmul(byte a, byte b) {
+    byte p = 0;
+    for (int i = 0; i < 8; i++) {
+        if ((b & 1) != 0) p ^= a;
+        byte hi_bit_set = (a & 0x80);
+        a <<= 1;
+        if (hi_bit_set) a ^= 0x1B;
+        b >>= 1;
+    }
+    return p;
+}
+
+uint32_t cpu_swap(uint32_t val) {
+    return ((val >> 24) & 0x000000ff) | 
+           ((val >>  8) & 0x0000ff00) | 
+           ((val <<  8) & 0x00ff0000) | 
+           ((val << 24) & 0xff000000);
+}
+
+void precompute_tables_little_endian(uint32_t* Te0, uint32_t* Te1, uint32_t* Te2, uint32_t* Te3) {
+   for (int i = 0; i < 256; i++) {
+        byte s = sbox[i];
+        
+        uint32_t v0 = (gmul(s, 2) << 24) | (s << 16) | (s << 8) | gmul(s, 3);
+        uint32_t v1 = (v0 >> 8) | (v0 << 24);
+        uint32_t v2 = (v1 >> 8) | (v1 << 24);
+        uint32_t v3 = (v2 >> 8) | (v2 << 24);
+        
+        Te0[i] = cpu_swap(v0);
+        Te1[i] = cpu_swap(v1);
+        Te2[i] = cpu_swap(v2);
+        Te3[i] = cpu_swap(v3);
+    }
+}
+
+/*
+ *
+ * AES Encryption device function : d_AES_encrypt
+ * Optimization technique used:
+ *      T Table for faster Computation
+ *      Handling uint32_t instead of uint8_t for better Global Load and Store Efficiency
+ *      Loading the PT/in data to registers for faster access rather than accessing directly the memory
+ *      
+ */
+
+__device__ void d_AES_encrypt(
+    byte* out_bytes, 
+    const byte* PT_bytes, 
+    const byte* RoundKey,
+    const uint32_t* shared_Te0,
+    const uint32_t* shared_Te1,
+    const uint32_t* shared_Te2,
+    const uint32_t* shared_Te3,
+    const byte* shared_sbox 
+) {
+    // Load the PT Data to Registers for faster access and use unit32_t data access
+    uint32_t s0 = ((const uint32_t*)PT_bytes)[0];
+    uint32_t s1 = ((const uint32_t*)PT_bytes)[1];
+    uint32_t s2 = ((const uint32_t*)PT_bytes)[2];
+    uint32_t s3 = ((const uint32_t*)PT_bytes)[3];
+
+    // Load the Roundkey Data to Registers for faster access use unit32_t data access
+    const uint32_t* rk = (const uint32_t*)RoundKey;
+    s0 ^= rk[0]; s1 ^= rk[1]; s2 ^= rk[2]; s3 ^= rk[3];
+
+    #pragma unroll
+    for (int r = 1; r < 10; ++r) {
+        uint32_t t0, t1, t2, t3;
+        // T-Table data handling SubBytes, ShiftRows and MixColumns operations in one go
+        t0 = shared_Te0[s0 & 0xff] ^ shared_Te1[(s1 >> 8) & 0xff] ^ shared_Te2[(s2 >> 16) & 0xff] ^ shared_Te3[(s3 >> 24) & 0xff] ^ rk[4*r + 0];
+        t1 = shared_Te0[s1 & 0xff] ^ shared_Te1[(s2 >> 8) & 0xff] ^ shared_Te2[(s3 >> 16) & 0xff] ^ shared_Te3[(s0 >> 24) & 0xff] ^ rk[4*r + 1];
+        t2 = shared_Te0[s2 & 0xff] ^ shared_Te1[(s3 >> 8) & 0xff] ^ shared_Te2[(s0 >> 16) & 0xff] ^ shared_Te3[(s1 >> 24) & 0xff] ^ rk[4*r + 2];
+        t3 = shared_Te0[s3 & 0xff] ^ shared_Te1[(s0 >> 8) & 0xff] ^ shared_Te2[(s1 >> 16) & 0xff] ^ shared_Te3[(s2 >> 24) & 0xff] ^ rk[4*r + 3];
+
+        s0 = t0; s1 = t1; s2 = t2; s3 = t3;
+    }
+
+    // Load the final Round Key
+    const uint32_t last_rk0 = ((const uint32_t*)(RoundKey + 160))[0];
+    const uint32_t last_rk1 = ((const uint32_t*)(RoundKey + 160))[1];
+    const uint32_t last_rk2 = ((const uint32_t*)(RoundKey + 160))[2];
+    const uint32_t last_rk3 = ((const uint32_t*)(RoundKey + 160))[3];
+
+    uint32_t out0, out1, out2, out3;
+
+    // Final calculation
+    out0 =  (uint32_t)shared_sbox[s0 & 0xff]        ^
+           ((uint32_t)shared_sbox[(s1 >> 8) & 0xff] << 8)  ^
+           ((uint32_t)shared_sbox[(s2 >> 16) & 0xff] << 16) ^
+           ((uint32_t)shared_sbox[(s3 >> 24) & 0xff] << 24);
+    out0 ^= last_rk0;
+
+    out1 =  (uint32_t)shared_sbox[s1 & 0xff]        ^
+           ((uint32_t)shared_sbox[(s2 >> 8) & 0xff] << 8)  ^
+           ((uint32_t)shared_sbox[(s3 >> 16) & 0xff] << 16) ^
+           ((uint32_t)shared_sbox[(s0 >> 24) & 0xff] << 24);
+    out1 ^= last_rk1;
+
+    out2 =  (uint32_t)shared_sbox[s2 & 0xff]        ^
+           ((uint32_t)shared_sbox[(s3 >> 8) & 0xff] << 8)  ^
+           ((uint32_t)shared_sbox[(s0 >> 16) & 0xff] << 16) ^
+           ((uint32_t)shared_sbox[(s1 >> 24) & 0xff] << 24);
+    out2 ^= last_rk2;
+
+    out3 =  (uint32_t)shared_sbox[s3 & 0xff]        ^
+           ((uint32_t)shared_sbox[(s0 >> 8) & 0xff] << 8)  ^
+           ((uint32_t)shared_sbox[(s1 >> 16) & 0xff] << 16) ^
+           ((uint32_t)shared_sbox[(s2 >> 24) & 0xff] << 24);
+    out3 ^= last_rk3;
+
+    ((uint32_t*)out_bytes)[0] = out0;
+    ((uint32_t*)out_bytes)[1] = out1;
+    ((uint32_t*)out_bytes)[2] = out2;
+    ((uint32_t*)out_bytes)[3] = out3;
+}
+/*
+ *
+ * GCTR CUDA optimized Kernel
+ * Optimization technique used:
+ *        -> T-Tables (4KB) Shared Memory Technique
+ *        -> Vectorized Memory Access
+ *
+ */
+
+__global__ void gctr_kernel(
+    uint4 J0_val,
+    const byte* __restrict__ PT, 
+    int num_blocks, 
+    byte* __restrict__ CT, 
+    int chunk_offset, 
+    const uint32_t* __restrict__ Te0,
+    const uint32_t* __restrict__ Te1,
+    const uint32_t* __restrict__ Te2,
+    const uint32_t* __restrict__ Te3,
+    const byte* __restrict__ GlobalSbox 
+) {
+    // Allocating Shared memory for T-Tables and S-Box (4KB Tables + 256B S-Box)
+    __shared__ uint32_t shared_Te0[256];
+    __shared__ uint32_t shared_Te1[256];
+    __shared__ uint32_t shared_Te2[256];
+    __shared__ uint32_t shared_Te3[256];
+    __shared__ byte     shared_sbox[256];
+
+    int tx = threadIdx.x;
+    int bdim = blockDim.x;
+    //Load 256 bytes of T-Table/S-box data, in each block we have 128 threads handling two bytes in each thread
+    for (int i = tx; i < 256; i += bdim) {
+        // Load T-Tables
+        shared_Te0[i] = Te0[i];
+        shared_Te1[i] = Te1[i];
+        shared_Te2[i] = Te2[i];
+        shared_Te3[i] = Te3[i];
+        
+        // Load S-Box
+        shared_sbox[i] = GlobalSbox[i]; 
+    }
+
+    __syncthreads(); 
+
+    // Calculate the index used for AES encryption
     int blk_idx = blockIdx.x * blockDim.x + threadIdx.x;
-
     if (blk_idx >= num_blocks) return;
 
-    // Load 16 bytes PT data
+    // Vectorized Memory Access
     const uint4* pt_ptr_128 = reinterpret_cast<const uint4*>(PT);
     uint4 pt_vec = pt_ptr_128[blk_idx]; 
 
-    // Load J0 (IV)
-    const uint32_t* j0_ptr = (const uint32_t*)J0;
-    uint32_t iv_w0 = j0_ptr[0];
-    uint32_t iv_w1 = j0_ptr[1];
-    uint32_t iv_w2 = j0_ptr[2];
-    uint32_t iv_cnt = j0_ptr[3];
+    uint32_t iv_w0 = J0_val.x; //96-bit IV (Nonce)
+    uint32_t iv_w1 = J0_val.y; //96-bit IV (Nonce)
+    uint32_t iv_w2 = J0_val.z; // 96-bit IV (Nonce)
+    uint32_t iv_cnt = J0_val.w; // Holds the Counter part
 
-    uint32_t initial_counter = __byte_perm(iv_cnt, 0, 0x0123); // Swap to Little Endian
-    uint32_t current_val = initial_counter + chunk_offset + blk_idx + 1;
-    uint32_t ctr_be = __byte_perm(current_val, 0, 0x0123);     // Swap back to Big Endian
+    uint32_t initial_counter = __byte_perm(iv_cnt, 0, 0x0123); // Convert the endian for increment
+    uint32_t current_val = initial_counter + chunk_offset + blk_idx + 1; 
+    uint32_t ctr_be = __byte_perm(current_val, 0, 0x0123); 
 
-
-    // construct the block in 
     byte ctr_block_local[16];
     ((uint32_t*)ctr_block_local)[0] = iv_w0;
     ((uint32_t*)ctr_block_local)[1] = iv_w1;
     ((uint32_t*)ctr_block_local)[2] = iv_w2;
     ((uint32_t*)ctr_block_local)[3] = ctr_be;
-
-    byte enc_ctr_block[16];
-    d_AES_encrypt_block(enc_ctr_block, ctr_block_local, d_RoundKey);
-
-
-    uint4 enc_vec = *reinterpret_cast<uint4*>(enc_ctr_block);
     
+    byte enc_ctr_block[16];
+
+    // Do the AES encryption 
+    d_AES_encrypt(
+        enc_ctr_block, ctr_block_local, d_RoundKey, 
+        shared_Te0, shared_Te1, shared_Te2, shared_Te3, 
+        shared_sbox
+    );
+
+    // Xor the AES ouput to PT data Vectorized handling helps in better Global Load/Store Efficiency
+    uint4 enc_vec = *reinterpret_cast<uint4*>(enc_ctr_block);
     uint4 result_vec;
     result_vec.x = pt_vec.x ^ enc_vec.x;
     result_vec.y = pt_vec.y ^ enc_vec.y;
     result_vec.z = pt_vec.z ^ enc_vec.z;
     result_vec.w = pt_vec.w ^ enc_vec.w;
 
-    // Store directly as uint4
     uint4* ct_ptr_128 = reinterpret_cast<uint4*>(CT);
     ct_ptr_128[blk_idx] = result_vec;
-
 }
+
 
 
 //   Header TODO
@@ -509,8 +625,8 @@ void ghash(const block_t H, const byte* X, size_t len_bits, block_t S) {
             break; 
         }
         xor_blocks(Y, Y, X + offset);
-        gcm_gf_mult(Y, H, temp_Y); // Use temp buffer
-        memcpy(Y, temp_Y, 16); // Copy result back
+        gcm_gf_mult(Y, H, temp_Y); 
+        memcpy(Y, temp_Y, 16); 
         offset += 16;
     }
 
@@ -528,14 +644,14 @@ void ghash(const block_t H, const byte* X, size_t len_bits, block_t S) {
         }
         
         xor_blocks(Y, Y, last_block);
-        gcm_gf_mult(Y, H, temp_Y); // Use temp buffer
-        memcpy(Y, temp_Y, 16); // Copy result back
+        gcm_gf_mult(Y, H, temp_Y);
+        memcpy(Y, temp_Y, 16);
     }
     
     memcpy(S, Y, 16);
 }
 
-//  Header TODO
+//  Header TODO Function
 int aes_gcm_128_encrypt(
     const byte Key[16],
     const byte IV[12],
@@ -547,147 +663,110 @@ int aes_gcm_128_encrypt(
     byte* Tag,
     size_t Taglen_bytes
 ) {
-  int pt_len_bytes = PTlen_bits/8;
+    int pt_len_bytes = PTlen_bits/8;
     byte RoundKey[176];
-    KeyExpansion(RoundKey, Key); // Execute in the GPU if possible 
+    KeyExpansion(RoundKey, Key);
 
     block_t H, Z;
     memset(Z, 0, 16);
-    AES_encrypt_block(H, Z, RoundKey); // optimize using TTable techniques 
+    AES_encrypt_block(H, Z, RoundKey);
 
     block_t J0;
     memcpy(J0, IV, 12);
     J0[12] = 0; J0[13] = 0; J0[14] = 0; J0[15] = 1;
 
-    byte h_J0[16]; 
-    memcpy(h_J0, HardCoded_IV, 12); 
-    h_J0[12]=0; h_J0[13]=0; h_J0[14]=0; h_J0[15]=1; 
+    // Send the J0 as value for register memory usage
+    uint4 J0_arg;
+    memcpy(&J0_arg, J0, 16);
  
-    
-    //byte* dev_RoundKey;
-    byte* d_J0;
     byte* dev_PT;
     byte* dev_CT;
-
-    cudaMalloc(&d_J0, 16);
-    //wbCheck(cudaMemcpy(d_J0, h_J0,16,cudaMemcpyHostToDevice));
-
-    wbCheck(cudaMalloc((void **)&dev_PT,PTlen_bits/8));
-    //wbCheck(cudaMemcpy(dev_PT, PT,PTlen_bits/8,cudaMemcpyHostToDevice));
-
-    wbCheck(cudaMalloc((void **)&dev_CT,PTlen_bits/8));
+    int pt_len_padded = ((pt_len_bytes + 15) / 16) * 16; // padded the data to 16 bytes of data used by AES
     
+    // Allocate memory for CT and PT
+    wbCheck(cudaMalloc((void **)&dev_PT, pt_len_padded));
+    wbCheck(cudaMalloc((void **)&dev_CT, pt_len_padded));
+    
+    // Allocate memory for T-Table and S box which are accesed by shared Memory
+    uint32_t h_Te0[256], h_Te1[256], h_Te2[256], h_Te3[256];
+    precompute_tables_little_endian(h_Te0, h_Te1, h_Te2, h_Te3);
+
+    wbCheck(cudaMalloc((void**)&d_Te0, 256 * sizeof(uint32_t)));
+    wbCheck(cudaMalloc((void**)&d_Te1, 256 * sizeof(uint32_t)));
+    wbCheck(cudaMalloc((void**)&d_Te2, 256 * sizeof(uint32_t)));
+    wbCheck(cudaMalloc((void**)&d_Te3, 256 * sizeof(uint32_t)));
+    wbCheck(cudaMalloc((void**)&d_GlobalSbox, 256 * sizeof(byte)));
+    
+    
+    
+    // Copy Tables & Keys
     wbTime_start(Compute, "Performing CUDA computation");
-    wbCheck(cudaMemcpy(d_J0, h_J0,16,cudaMemcpyHostToDevice));
-    cudaMemcpyToSymbol(d_sbox, sbox, 256);
-    cudaMemcpyToSymbol(d_RoundKey, RoundKey, 176);
+    wbCheck(cudaMemcpy(d_Te0, h_Te0, 256 * sizeof(uint32_t), cudaMemcpyHostToDevice));
+    wbCheck(cudaMemcpy(d_Te1, h_Te1, 256 * sizeof(uint32_t), cudaMemcpyHostToDevice));
+    wbCheck(cudaMemcpy(d_Te2, h_Te2, 256 * sizeof(uint32_t), cudaMemcpyHostToDevice));
+    wbCheck(cudaMemcpy(d_Te3, h_Te3, 256 * sizeof(uint32_t), cudaMemcpyHostToDevice));
+    wbCheck(cudaMemcpy(d_GlobalSbox, sbox, 256 * sizeof(byte), cudaMemcpyHostToDevice));
+    wbCheck(cudaMemcpyToSymbol(d_RoundKey, RoundKey, 176)); // Constant memory usage
     
     cudaStream_t streams[NUM_STREAMS];
 
     for (int i = 0; i < NUM_STREAMS; ++i) cudaStreamCreate(&streams[i]);
     
-    int target_chunk_size;
+    const int Min_Chunk_data = 64 * 1024;     // 64 KB (Below this, overhead hurts)
+    const int MAX_Saturation_Chunk_data = 4 * 1024 * 1024; // 4 MB (Bus is saturated)
+
+    int target_chunk_size = pt_len_bytes / NUM_STREAMS;
+
+    if (target_chunk_size < Min_Chunk_data) {
+        target_chunk_size = Min_Chunk_data;
+    }
     
-    if (pt_len_bytes <= 16 * 1024) {
-        // For small files, just do it in one go (or force alignment if you split)
-        target_chunk_size = pt_len_bytes; 
-    } else if (pt_len_bytes <= 1024 * 1024) {
-        // Medium files: 256KB chunks
-        target_chunk_size = 16 * 1024;
-    } else {
-        // Large files: 1MB chunks
-        target_chunk_size = 1024 * 1024; 
+    if (target_chunk_size > MAX_Saturation_Chunk_data) {
+        target_chunk_size = MAX_Saturation_Chunk_data;
     }
 
-    //Force Alignment to 16 Bytes
-    
-    int  chunk_size_bytes = ((target_chunk_size + 15) / 16) * 16;
+    if (pt_len_bytes < Min_Chunk_data) {
+        target_chunk_size = pt_len_bytes;
+    }
+    int chunk_size_bytes = ((target_chunk_size + 31) / 32) * 32;
 
-    //Recalculate Total Chunks
+    // Recalculate Total Chunks
     int total_chunks = (pt_len_bytes + chunk_size_bytes - 1) / chunk_size_bytes;
+
+    printf("Dynamic Optimization: %d streams processing chunks of %d bytes.\n", NUM_STREAMS, chunk_size_bytes);
     
-    //gctr_kernel<<<blocks, threads>>>(d_J0, dev_PT, num_blocks, dev_CT);
-    //cudaDeviceSynchronize();
-    printf("Processing %d bytes in %d chunks of %d bytes each.\n", pt_len_bytes, total_chunks, chunk_size_bytes);
-    
-    
-    /*for (int i = 0; i < total_chunks; ++i) {
-        int stream_id = i; 
-        
-        int offset = i * chunk_size_bytes;
-     
-        int current_bytes = (offset + chunk_size_bytes > pt_len_bytes) ? 
-                            (pt_len_bytes - offset) : chunk_size_bytes;
-        
-        wbCheck(cudaMemcpyAsync(&dev_PT[offset], &PT[offset], current_bytes, 
-                                cudaMemcpyHostToDevice, streams[stream_id]));
-    }
-
-    for (int i = 0; i < total_chunks; ++i) {
-        int stream_id = i;
-
-        int offset = i * chunk_size_bytes;
-        int current_bytes = (offset + chunk_size_bytes > pt_len_bytes) ? 
-                            (pt_len_bytes - offset) : chunk_size_bytes;
-        
-        int current_blocks = (current_bytes + 15) / 16;
-        int block_offset = offset / 16; 
-
-        //  Grid Calculation
-        int threads_per_block = 128;
-        int threads_needed = current_blocks;
-        int blocks = (threads_needed + threads_per_block - 1) / threads_per_block;
-        if(blocks == 0) blocks = 1;
-
-        gctr_kernel<<<blocks, threads_per_block, 0, streams[stream_id]>>>(
-            d_J0, 
-            &dev_PT[offset], 
-            current_blocks,
-            &dev_CT[offset],
-            block_offset
-        );
-    }
-
-    for (int i = 0; i < total_chunks; ++i) {
-        int stream_id = i;
-
-        int offset = i * chunk_size_bytes;
-        int current_bytes = (offset + chunk_size_bytes > pt_len_bytes) ? 
-                            (pt_len_bytes - offset) : chunk_size_bytes;
-
-        wbCheck(cudaMemcpyAsync(&CT[offset], &dev_CT[offset], current_bytes, 
-                                cudaMemcpyDeviceToHost, streams[stream_id]));
-    }*/
+   
     for (int i = 0; i < total_chunks; ++i) {
         int stream_id = i % NUM_STREAMS;
-        
-        // Calculate offsets and sizes for this chunk
         int offset = i * chunk_size_bytes;
-        int current_bytes = (offset + chunk_size_bytes > pt_len_bytes) ? (pt_len_bytes - offset) : chunk_size_bytes;
-        int current_blocks = (current_bytes + 15) / 16;
-        int block_offset = offset / 16; // Start block index for this chunk (for counter)
+        // Handling corner case for last chunk of data
+        int current_bytes = (offset + chunk_size_bytes > pt_len_padded) ? (pt_len_padded - offset) : chunk_size_bytes;
+        if (current_bytes <= 0) break;
+
+        int current_blocks = current_bytes / 16; 
+        int block_offset = offset / 16; 
 
         // Async Copy HostToDevice
-        cudaMemcpyAsync(&dev_PT[offset], &PT[offset], current_bytes, cudaMemcpyHostToDevice, streams[stream_id]);
+        wbCheck(cudaMemcpyAsync(&dev_PT[offset], &PT[offset], current_bytes, cudaMemcpyHostToDevice, streams[stream_id]));
 
-     
-        // Calculate grid size based on ILP
         int threads_per_block = 128;
-        int threads_needed = current_blocks;
-        int blocks = (threads_needed + threads_per_block - 1) / threads_per_block;
+        int blocks = (current_blocks + threads_per_block - 1) / threads_per_block;
         if(blocks == 0) blocks = 1;
 
+        // Kernel Launch
         gctr_kernel<<<blocks, threads_per_block, 0, streams[stream_id]>>>(
-            d_J0, 
+            J0_arg, 
             &dev_PT[offset], 
             current_blocks,
             &dev_CT[offset],
-            block_offset 
+            block_offset,
+            d_Te0, d_Te1, d_Te2, d_Te3, d_GlobalSbox
         );
 
-        //Async Copy DeviceToHost
-        cudaMemcpyAsync(&CT[offset], &dev_CT[offset], current_bytes, cudaMemcpyDeviceToHost, streams[stream_id]);
+        // Async Copy DeviceToHost
+        wbCheck(cudaMemcpyAsync(&CT[offset], &dev_CT[offset], current_bytes, cudaMemcpyDeviceToHost, streams[stream_id]));
     }
+    
     
     for (int i = 0; i < NUM_STREAMS; ++i) cudaStreamSynchronize(streams[i]);
     
@@ -713,6 +792,9 @@ int aes_gcm_128_encrypt(
     
     memcpy(Tag, full_tag, Taglen_bytes);
 
+    // Free device memory
+    cudaFree(dev_PT); cudaFree(dev_CT);
+    cudaFree(d_Te0); cudaFree(d_Te1); cudaFree(d_Te2); cudaFree(d_Te3); cudaFree(d_GlobalSbox);
     return 0;
 }
 
@@ -749,11 +831,8 @@ int main(int argc, char *argv[]) {
   cudaMallocHost((void**)&TAG, TAG_LEN * sizeof(byte));
 
 
-  // Launching Sequential
-  // ----------------------------------------------------------
-  wbLog(TRACE, "Launching Sequential computation");
-  //wbTime_start(Compute, "Performing CUDA computation");
-  //@@ Perform Sequential computation here
+  // Launching Paralllel computation
+  wbLog(TRACE, "Launching Paralllel computation");
   aes_gcm_128_encrypt(
                       HardCoded_Key,
                       HardCoded_IV,
@@ -765,7 +844,6 @@ int main(int argc, char *argv[]) {
                       TAG, 
                       TAG_LEN
   );
-  //wbTime_stop(Compute, "Performing CUDA computation");
 
 #if DEBUG_ENABLE
 	printf("\n\n Calculated Cipher Data : \n");
@@ -773,7 +851,7 @@ int main(int argc, char *argv[]) {
 		printf("[%d] = %x \n", i,CT[i]);
 	}
 	printf("\n\n");
-#endif
+#endif 
   
 	// Convert Cipher to verify with WB library
 	float * CT_float = (float *)malloc(PT_Len * sizeof(float));
