@@ -19,9 +19,9 @@ if "check_output" not in dir( subprocess ):
 nCorrect = 0
 
 
-for i in range(20):
-	datasetDir = "./Dataset/" + str(i) + "/"
-	result = subprocess.check_output(["./build/AES_Encrypt_GCM_128_Seq","-i",datasetDir+"PT.dat","-e",datasetDir+"CT.dat","-t","vector"])
+for i in range(21):
+	datasetDir = "./Dataset_256/" + str(i) + "/"
+	result = subprocess.check_output(["./build/AES_Encrypt_GCM_256_Seq","-i",datasetDir+"PT.dat","-e",datasetDir+"CT.dat","-t","vector"])
 	correct = re.search(b'"correctq": true',result) != None
 	if correct:
 		nCorrect += 1
@@ -32,4 +32,4 @@ for i in range(20):
 	print("Dataset/" + str(i) + "Execute Time:" + str(ExecuteTime))
 
 
-print(str(nCorrect) + " / 20 correct")
+print(str(nCorrect) + " / 21 correct")

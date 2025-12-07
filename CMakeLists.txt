@@ -35,3 +35,9 @@ target_link_libraries(AES_Encrypt_GCM_128_Seq  wb)
 
 cuda_add_executable(AES_Encrypt_GCM_128_Parallel_CUDA AES_Encrypt_GCM_128_Parallel_CUDA.cu)
 target_link_libraries(AES_Encrypt_GCM_128_Parallel_CUDA  wb)
+
+cuda_add_executable(AES_Encrypt_GCM_256_Seq AES_Encrypt_GCM_256_Seq.cu)
+target_link_libraries(AES_Encrypt_GCM_256_Seq  wb)
+
+cuda_add_executable(AES_Encrypt_GCM_256_Parallel_CUDA AES_Encrypt_GCM_256_Parallel_CUDA.cu)
+target_link_libraries(AES_Encrypt_GCM_256_Parallel_CUDA  wb)

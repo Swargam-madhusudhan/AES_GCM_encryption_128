@@ -74,35 +74,37 @@ typedef byte state_t[4][4];
   * Tag = c3a2481fc31a33b46c6b64041d5d
   * Source : https://csrc.nist.gov/Projects/cryptographic-algorithm-validation-program/cavp-testing-block-cipher-modes
   */
-#define AES_BLOCK_SIZE    (16)              // 128 bits - 8 bytes
-#define AES_KEY_SIZE	    (16)              // 126 bit AES Key
-#define AES_NO_ROUNDS	    (10)              // 10 rounds for 128 bit key
+
 #define NUM_STREAMS       (8)               // Number of concurrent streams  
 #define AAD_LEN_BITS 	    (160)             // Hardcoded value for this algorithm
 #define AAD_LEN_BYTE 	    (AAD_LEN_BITS/8)
-#define KEY_LEN_BITS      (128)
+#define KEY_LEN_BITS      (256)
 #define KEY_LEN_BYTE 	    (KEY_LEN_BITS/8)
 #define IV_LEN_BITS	      (96)
 #define IV_LEN_BYTE	      (IV_LEN_BITS/8)
-#define TAG_LEN		        (14)
+#define TAG_LEN		        (16)
 
 /* AES 128 values */
-#define Nr		            10	  //	The number of rounds.
-#define Nk 		            4	    //	The number of 32-bit words comprising the key
+#define Nr		            14	  //	The number of rounds.
+#define Nk 		            8	    //	The number of 32-bit words comprising the key
 #define Nb 		            4	    //	The number of columns comprising the state
- byte HardCoded_Key[KEY_LEN_BYTE] = {0x87, 0xf9,0x6a, 0x86,
-                                     0x40, 0x4a, 0x2c, 0x79,
-                                     0x3b, 0x26, 0xd7, 0xe1,
-                                     0x2c, 0x5a, 0xaf,0xfa}; // 16 bytes - 128bits 
- byte HardCoded_IV[IV_LEN_BYTE] = {0x5c, 0x66, 0x99, 0x38,
-                                    0x1a, 0x93, 0x60, 0xec,
-                                    0x83, 0xdd, 0x98, 0xdc}; // 12 bytes - 96 bits
+ byte HardCoded_Key[KEY_LEN_BYTE] = {0x83, 0x68, 0x8d, 0xeb,
+                                    0x4a, 0xf8, 0x00, 0x7f,
+                                    0x9b, 0x71, 0x3b, 0x47,
+                                    0xcf, 0xa6, 0xc7, 0x3e,
+                                    0x35, 0xea, 0x7a, 0x3a,
+                                    0xa4, 0xec, 0xdb, 0x41,
+                                    0x4d, 0xde, 0xd0, 0x3b,
+                                    0xf7, 0xa0, 0xfd, 0x3a}; // 32 bytes - 256 bits 
+ byte HardCoded_IV[IV_LEN_BYTE] = {0x0b, 0x45, 0x97, 0x24,
+                                  0x90, 0x4e, 0x01, 0x0a,
+                                  0x46, 0x90, 0x1c, 0xf3}; // 12 bytes - 96 bits
 
- byte HardCoded_AAD[AAD_LEN_BYTE] = {0xf8, 0x90, 0x16, 0xb2,
-                                     0x6c, 0xea, 0x39, 0xea,
-                                     0x38, 0xa0, 0x38, 0xa0,
-                                     0xf1, 0x8a, 0xf5, 0x3f,
-                                     0x72, 0xf7, 0xfd, 0x17};//20 bytes - 160 bytes
+ byte HardCoded_AAD[AAD_LEN_BYTE] = {0x79, 0x4a, 0x14, 0xcc,
+                                    0xd1, 0x78, 0xc8, 0xeb,
+                                    0xfd, 0x13, 0x79, 0xdc,
+                                    0x70, 0x4c, 0x5e, 0x20,
+                                    0x8f, 0x9d, 0x84, 0x24}; //20 bytes - 160 bytes
 
  /*
   * SUBBYTES uses substitution table called as S-box.
@@ -139,7 +141,7 @@ static const byte Rcon[11] = {
 
 
 /* Global data */
-__constant__ byte d_RoundKey[176];        // Key Roundkey used by AES encryption
+__constant__ byte d_RoundKey[240];        // Key Roundkey used by AES encryption
 uint32_t *d_Te0, *d_Te1, *d_Te2, *d_Te3;  // T Table optimization used for faster AES implementation
 byte *d_GlobalSbox; // S-Box in Global Memory
 
@@ -242,10 +244,10 @@ void MixColumns(state_t* state) {
  * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf Chapter 5.2
  */
  
- void KeyExpansion(byte RoundKey[176], const byte Key[16]) {
+  void KeyExpansion(byte RoundKey[240], const byte Key[32]) {
     unsigned i, j, k;
     byte temp[4];
-	/*Initialize first 4 words W0 - W3 */
+	/*Initialize first 8 words W0 - W7 */
     for (i = 0; i < Nk; ++i) {
         RoundKey[i * 4 + 0] = Key[i * 4 + 0];
         RoundKey[i * 4 + 1] = Key[i * 4 + 1];
@@ -253,7 +255,7 @@ void MixColumns(state_t* state) {
         RoundKey[i * 4 + 3] = Key[i * 4 + 3];
     }
 	
-	/* Need to calculate remaining W4 - W43 */
+	/* Need to calculate remaining W8 - W59 */
     for (i = Nk; i < Nb * (Nr + 1); ++i) {
         k = (i - 1) * 4;
 		/* Left Shift the Word */
@@ -261,23 +263,32 @@ void MixColumns(state_t* state) {
         temp[1] = RoundKey[k + 1];
         temp[2] = RoundKey[k + 2];
         temp[3] = RoundKey[k + 3];
-        if (i % Nk == 0) {
-            {
-				/* Left Shift the Word */
-                byte u = temp[0];
-                temp[0] = temp[1];
-                temp[1] = temp[2];
-                temp[2] = temp[3];
-                temp[3] = u;
-            }
-            {
-				/* Substitute the S box word */
-                temp[0] = sbox[temp[0]];
-                temp[1] = sbox[temp[1]];
-                temp[2] = sbox[temp[2]];
-                temp[3] = sbox[temp[3]];
-            }
+        if (i % Nk == 0)
+        {
+
+            /* Left Shift the Word */
+            byte u = temp[0];
+            temp[0] = temp[1];
+            temp[1] = temp[2];
+            temp[2] = temp[3];
+            temp[3] = u;
+
+            /* Substitute the S box word */
+            temp[0] = sbox[temp[0]];
+            temp[1] = sbox[temp[1]];
+            temp[2] = sbox[temp[2]];
+            temp[3] = sbox[temp[3]];
+
             temp[0] = temp[0] ^ Rcon[i / Nk];
+        }
+        // special case for AES-256: SubWord applied when (i % Nk == 4)
+        else if (Nk > 6 && i % Nk == 4)
+        {
+            // SubWord only (no RotWord or Rcon)
+            temp[0] = sbox[temp[0]];
+            temp[1] = sbox[temp[1]];
+            temp[2] = sbox[temp[2]];
+            temp[3] = sbox[temp[3]];
         }
 		/* Update the key*/
         j = i * 4;
@@ -297,7 +308,7 @@ void MixColumns(state_t* state) {
  * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
  */ 
 
-void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) {
+void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[240]) {
     state_t state_buf;
     state_t* s = &state_buf;
     for(int i=0; i<4; ++i) {
@@ -470,7 +481,7 @@ __device__ void d_AES_encrypt(
     s0 ^= rk[0]; s1 ^= rk[1]; s2 ^= rk[2]; s3 ^= rk[3];
 
     #pragma unroll
-    for (int r = 1; r < 10; ++r) {
+    for (int r = 1; r < Nr; ++r) {
         uint32_t t0, t1, t2, t3;
         // T-Table data handling SubBytes, ShiftRows and MixColumns operations in one go
         t0 = shared_Te0[s0 & 0xff] ^ shared_Te1[(s1 >> 8) & 0xff] ^ shared_Te2[(s2 >> 16) & 0xff] ^ shared_Te3[(s3 >> 24) & 0xff] ^ rk[4*r + 0];
@@ -481,38 +492,37 @@ __device__ void d_AES_encrypt(
         s0 = t0; s1 = t1; s2 = t2; s3 = t3;
     }
 
-    // Load the final Round Key
-    const uint32_t last_rk0 = ((const uint32_t*)(RoundKey + 160))[0];
-    const uint32_t last_rk1 = ((const uint32_t*)(RoundKey + 160))[1];
-    const uint32_t last_rk2 = ((const uint32_t*)(RoundKey + 160))[2];
-    const uint32_t last_rk3 = ((const uint32_t*)(RoundKey + 160))[3];
-
+     // Round 14 (Final) - No MixColumns
+    const uint32_t* last_rk = (const uint32_t*)(RoundKey + 224);
     uint32_t out0, out1, out2, out3;
 
-    // Final calculation
-    out0 =  (uint32_t)shared_sbox[s0 & 0xff]        ^
-           ((uint32_t)shared_sbox[(s1 >> 8) & 0xff] << 8)  ^
+    // ShiftRows implementation on 32-bit words
+    // Row 0 (No shift), Row 1 (Shift 1), Row 2 (Shift 2), Row 3 (Shift 3)
+    // Constructed into Columns for Output
+    
+    out0 = (uint32_t)shared_sbox[s0 & 0xff] ^
+           ((uint32_t)shared_sbox[(s1 >> 8) & 0xff] << 8) ^
            ((uint32_t)shared_sbox[(s2 >> 16) & 0xff] << 16) ^
            ((uint32_t)shared_sbox[(s3 >> 24) & 0xff] << 24);
-    out0 ^= last_rk0;
+    out0 ^= last_rk[0];
 
-    out1 =  (uint32_t)shared_sbox[s1 & 0xff]        ^
-           ((uint32_t)shared_sbox[(s2 >> 8) & 0xff] << 8)  ^
+    out1 = (uint32_t)shared_sbox[s1 & 0xff] ^
+           ((uint32_t)shared_sbox[(s2 >> 8) & 0xff] << 8) ^
            ((uint32_t)shared_sbox[(s3 >> 16) & 0xff] << 16) ^
            ((uint32_t)shared_sbox[(s0 >> 24) & 0xff] << 24);
-    out1 ^= last_rk1;
+    out1 ^= last_rk[1];
 
-    out2 =  (uint32_t)shared_sbox[s2 & 0xff]        ^
-           ((uint32_t)shared_sbox[(s3 >> 8) & 0xff] << 8)  ^
+    out2 = (uint32_t)shared_sbox[s2 & 0xff] ^
+           ((uint32_t)shared_sbox[(s3 >> 8) & 0xff] << 8) ^
            ((uint32_t)shared_sbox[(s0 >> 16) & 0xff] << 16) ^
            ((uint32_t)shared_sbox[(s1 >> 24) & 0xff] << 24);
-    out2 ^= last_rk2;
+    out2 ^= last_rk[2];
 
-    out3 =  (uint32_t)shared_sbox[s3 & 0xff]        ^
-           ((uint32_t)shared_sbox[(s0 >> 8) & 0xff] << 8)  ^
+    out3 = (uint32_t)shared_sbox[s3 & 0xff] ^
+           ((uint32_t)shared_sbox[(s0 >> 8) & 0xff] << 8) ^
            ((uint32_t)shared_sbox[(s1 >> 16) & 0xff] << 16) ^
            ((uint32_t)shared_sbox[(s2 >> 24) & 0xff] << 24);
-    out3 ^= last_rk3;
+    out3 ^= last_rk[3];
 
     ((uint32_t*)out_bytes)[0] = out0;
     ((uint32_t*)out_bytes)[1] = out1;
@@ -571,19 +581,19 @@ __global__ void gctr_kernel(
     const uint4* pt_ptr_128 = reinterpret_cast<const uint4*>(PT);
     uint4 pt_vec = pt_ptr_128[blk_idx]; 
 
-    uint32_t iv_w0 = J0_val.x; //96-bit IV (Nonce)
-    uint32_t iv_w1 = J0_val.y; //96-bit IV (Nonce)
-    uint32_t iv_w2 = J0_val.z; // 96-bit IV (Nonce)
-    uint32_t iv_cnt = J0_val.w; // Holds the Counter part
+    // Counter Generation
 
-    uint32_t initial_counter = __byte_perm(iv_cnt, 0, 0x0123); // Convert the endian for increment
+    uint32_t iv_cnt = J0_val.w; 
+    uint32_t initial_counter = __byte_perm(iv_cnt, 0, 0x0123); // Swap to Big Endian Value (1)
+    
     uint32_t current_val = initial_counter + chunk_offset + blk_idx + 1; 
-    uint32_t ctr_be = __byte_perm(current_val, 0, 0x0123); 
+    
+    uint32_t ctr_be = __byte_perm(current_val, 0, 0x0123); // Swap back to BE for memory
 
     byte ctr_block_local[16];
-    ((uint32_t*)ctr_block_local)[0] = iv_w0;
-    ((uint32_t*)ctr_block_local)[1] = iv_w1;
-    ((uint32_t*)ctr_block_local)[2] = iv_w2;
+    ((uint32_t*)ctr_block_local)[0] = J0_val.x;
+    ((uint32_t*)ctr_block_local)[1] = J0_val.y;
+    ((uint32_t*)ctr_block_local)[2] = J0_val.z;
     ((uint32_t*)ctr_block_local)[3] = ctr_be;
     
     byte enc_ctr_block[16];
@@ -603,8 +613,7 @@ __global__ void gctr_kernel(
     result_vec.z = pt_vec.z ^ enc_vec.z;
     result_vec.w = pt_vec.w ^ enc_vec.w;
 
-    uint4* ct_ptr_128 = reinterpret_cast<uint4*>(CT);
-    ct_ptr_128[blk_idx] = result_vec;
+    reinterpret_cast<uint4*>(CT)[blk_idx] = result_vec;
 }
 
 
@@ -652,8 +661,8 @@ void ghash(const block_t H, const byte* X, size_t len_bits, block_t S) {
 }
 
 //  Header TODO Function
-int aes_gcm_128_encrypt(
-    const byte Key[16],
+int aes_gcm_256_encrypt(
+    const byte Key[32],
     const byte IV[12],
     const byte* PT,
     size_t PTlen_bits,
@@ -664,7 +673,7 @@ int aes_gcm_128_encrypt(
     size_t Taglen_bytes
 ) {
     int pt_len_bytes = PTlen_bits/8;
-    byte RoundKey[176];
+    byte RoundKey[240];
     KeyExpansion(RoundKey, Key);
 
     block_t H, Z;
@@ -706,13 +715,13 @@ int aes_gcm_128_encrypt(
     wbCheck(cudaMemcpy(d_Te2, h_Te2, 256 * sizeof(uint32_t), cudaMemcpyHostToDevice));
     wbCheck(cudaMemcpy(d_Te3, h_Te3, 256 * sizeof(uint32_t), cudaMemcpyHostToDevice));
     wbCheck(cudaMemcpy(d_GlobalSbox, sbox, 256 * sizeof(byte), cudaMemcpyHostToDevice));
-    wbCheck(cudaMemcpyToSymbol(d_RoundKey, RoundKey, 176)); // Constant memory usage
+    wbCheck(cudaMemcpyToSymbol(d_RoundKey, RoundKey, 240)); // Constant memory usage
     
     cudaStream_t streams[NUM_STREAMS];
 
     for (int i = 0; i < NUM_STREAMS; ++i) cudaStreamCreate(&streams[i]);
     
-    const int Min_Chunk_data = 64 * 1024;     // 64 KB (Below this, overhead hurts)
+      const int Min_Chunk_data = 64 * 1024;     // 64 KB (Below this, overhead hurts)
     const int MAX_Saturation_Chunk_data = 4 * 1024 * 1024; // 4 MB (Bus is saturated)
 
     int target_chunk_size = pt_len_bytes / NUM_STREAMS;
@@ -737,7 +746,7 @@ int aes_gcm_128_encrypt(
     
    
     for (int i = 0; i < total_chunks; ++i) {
-        int stream_id = i % NUM_STREAMS;
+         int stream_id = i % NUM_STREAMS;
         int offset = i * chunk_size_bytes;
         // Handling corner case for last chunk of data
         int current_bytes = (offset + chunk_size_bytes > pt_len_padded) ? (pt_len_padded - offset) : chunk_size_bytes;
@@ -789,7 +798,7 @@ int aes_gcm_128_encrypt(
 
     block_t full_tag;
     gctr(RoundKey, J0, S, 16 * 8, full_tag);
-    
+     
     memcpy(Tag, full_tag, Taglen_bytes);
 
     // Free device memory
@@ -833,7 +842,7 @@ int main(int argc, char *argv[]) {
 
   // Launching Paralllel computation
   wbLog(TRACE, "Launching Paralllel computation");
-  aes_gcm_128_encrypt(
+  aes_gcm_256_encrypt(
                       HardCoded_Key,
                       HardCoded_IV,
                       PT,
