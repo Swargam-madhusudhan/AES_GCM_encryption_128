@@ -1,12 +1,14 @@
 /**
- * @file AES_Encryption_GCM_Mode.cu
- * @brief AES encryption 128 Sequence code evaluation.
- *
+ * @file AES_Encrypt_GCM_128_Seq.cu
+ * @brief AES encryption 128 Sequence code.
  * 
+ *  Command: ./AES_Encrypt_GCM_128_Seq -i ../Dataset_256/<DATASET NO>/PT.dat -e ../Dataset_256/<DATASET NO>/CT.dat -t vector
  * 
  *
  * @Author: Madhusudhan Swargam <mswargam@oakland.edu>
  *          Prathiksha Chikkamadal Manjunatha <pchikkamadalman@oakland.edu>
+ * Source : Algorithm Source code reference :
+ *            https://web.mit.edu/freebsd/head/contrib/wpa/src/crypto/aes-gcm.c
  * @date 2025-Nov
  * @copyright
  */
@@ -44,9 +46,9 @@ typedef byte block_t[16];
  */
 typedef byte state_t[4][4];
 
-#define AES_BLOCK_SIZE	16 // 128 bits - 8 bytes
-#define AES_KEY_SIZE	16 // 126 bit AES Key
-#define AES_NO_ROUNDS	10 // 10 rounds for 128 bit key
+#define AES_BLOCK_SIZE      16 // 128 bits - 8 bytes
+#define AES_KEY_SIZE        16 // 126 bit AES Key
+#define AES_NO_ROUNDS       10 // 10 rounds for 128 bit key
   
  /* 
   *
@@ -115,8 +117,6 @@ typedef byte state_t[4][4];
 };
 
 
-//TODO used reference as https://web.mit.edu/freebsd/head/contrib/wpa/src/crypto/aes-gcm.c
-
 
  /*
   * KEYEXPANSION  invokes 10 fxed words denoted by Rcon Round Constants.
@@ -168,10 +168,13 @@ void SubBytes(state_t* state) {
         }
     }
 }
+
+
 /*
- * TODO
+ * 5.1.2 SHIFTROWS()  SHIFTROWS() is a transformation of the state in which the bytes
+ * in the last three rows of the state are cyclically shifted
  *
- * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
+ * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
  */
 void ShiftRows(state_t* state) {
     byte temp;
@@ -201,9 +204,10 @@ byte xtime(byte x) {
 
 
 /*
- * TODO
+ * 5.1.3 MIXCOLUMNS() is a transformation of the state that multiplies each of
+ * the four columns of the state by a single fxed matrix
  *
- * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
+ * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
  */
 void MixColumns(state_t* state) {
     byte a, b, c, d;
@@ -230,7 +234,7 @@ void MixColumns(state_t* state) {
  void KeyExpansion(byte RoundKey[176], const byte Key[16]) {
     unsigned i, j, k;
     byte temp[4];
-	/*Initialize first 4 words W0 - W3 */
+    /*Initialize first 4 words W0 - W3 */
     for (i = 0; i < Nk; ++i) {
         RoundKey[i * 4 + 0] = Key[i * 4 + 0];
         RoundKey[i * 4 + 1] = Key[i * 4 + 1];
@@ -238,17 +242,17 @@ void MixColumns(state_t* state) {
         RoundKey[i * 4 + 3] = Key[i * 4 + 3];
     }
 	
-	/* Need to calculate remaining W4 - W43 */
+    /* Need to calculate remaining W4 - W43 */
     for (i = Nk; i < Nb * (Nr + 1); ++i) {
         k = (i - 1) * 4;
-		/* Left Shift the Word */
+        /* Left Shift the Word */
         temp[0] = RoundKey[k + 0];
         temp[1] = RoundKey[k + 1];
         temp[2] = RoundKey[k + 2];
         temp[3] = RoundKey[k + 3];
         if (i % Nk == 0) {
             {
-				/* Left Shift the Word */
+                /* Left Shift the Word */
                 byte u = temp[0];
                 temp[0] = temp[1];
                 temp[1] = temp[2];
@@ -256,7 +260,7 @@ void MixColumns(state_t* state) {
                 temp[3] = u;
             }
             {
-				/* Substitute the S box word */
+                /* Substitute the S box word */
                 temp[0] = sbox[temp[0]];
                 temp[1] = sbox[temp[1]];
                 temp[2] = sbox[temp[2]];
@@ -264,7 +268,7 @@ void MixColumns(state_t* state) {
             }
             temp[0] = temp[0] ^ Rcon[i / Nk];
         }
-		/* Update the key*/
+        /* Update the key*/
         j = i * 4;
         k = (i - Nk) * 4;
         RoundKey[j + 0] = RoundKey[k + 0] ^ temp[0];
@@ -277,9 +281,10 @@ void MixColumns(state_t* state) {
 
 
 /*
- * TODO
+ * 5.1 CIPHER() 
+ * AES encryption implemented as per Pseudocode for CIPHER() 
  *
- * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
+ * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
  */
 void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) {
     state_t state_buf;
@@ -307,17 +312,14 @@ void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) 
 }
 
 
+
 /*
- * TODO 6.3 Multiplication Operation on Blocks 
-The • operation on (pairs of) the 2128 possible blocks corresponds to the multiplication operation
-for the binary Galois (finite) field of 2128 elements
+ * 6.3 Multiplication Operation on Blocks 
+ * operation on (pairs of) the 2128 possible blocks corresponds to the multiplication operation
+ * for the binary Galois (finite) field of 2128 elements
  *
- * Source : https://csrc.nist.rip/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-revised-spec.pdf TODO
+ * Source : https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
  */
-
-
-
-// GCM GF(2^128) multiplication  Header TODO
 void gcm_gf_mult(const block_t x, const block_t y, block_t z) {
     memset(z, 0, 16);
     block_t v;
@@ -340,7 +342,9 @@ void gcm_gf_mult(const block_t x, const block_t y, block_t z) {
 }
 
 
-//  Header TODO
+/*
+ * gcm_inc_counter : Used to increment the lower bits of IV + counter data
+ */
 void gcm_inc_counter(block_t ctr) {
     for (int i = 15; i >= 12; --i) {
         ctr[i]++;
@@ -348,14 +352,21 @@ void gcm_inc_counter(block_t ctr) {
     }
 }
 
-// Header TODO
+/*
+ * xor_blocks : used to calcluate the xor operation on the provided block_t
+ *
+ */
 void xor_blocks(block_t out, const block_t a, const block_t b) {
     for (int i = 0; i < 16; ++i) {
         out[i] = a[i] ^ b[i];
     }
 }
 
-// GCTR: AES-CTR mode encryption   Header TODO
+/*
+ * 6.5 GCTR Function 
+ * Calculates the data encryption and does the Xor operation
+ * Source: https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
+ */
 void gctr(const byte* RoundKey, const block_t ICB, const byte* in, size_t len_bits, byte* out) {
     block_t ctr_block, enc_ctr_block;
     memcpy(ctr_block, ICB, 16);
@@ -384,7 +395,12 @@ void gctr(const byte* RoundKey, const block_t ICB, const byte* in, size_t len_bi
     }
 }
 
-//   Header TODO
+/*
+ * 6.4 GHASH Function 
+ *
+ *
+ * Source https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
+ */
 void ghash(const block_t H, const byte* X, size_t len_bits, block_t S) {
     block_t Y;
     memcpy(Y, S, 16);
@@ -426,7 +442,11 @@ void ghash(const block_t H, const byte* X, size_t len_bits, block_t S) {
     memcpy(S, Y, 16);
 }
 
-//  Header TODO
+/* 
+ * aes_gcm_128_encrypt Does the AES GCM 128 encryption
+ * 7.1 Algorithm for the Authenticated Encryption Function
+ * Source : https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
+ */
 int aes_gcm_128_encrypt(
     const byte Key[16],
     const byte IV[12],
@@ -456,9 +476,9 @@ int aes_gcm_128_encrypt(
     block_t ICB;
     memcpy(ICB, J0, 16);
     gcm_inc_counter(ICB);
-    wbTime_start(Compute, "Performing CUDA computation");
+    wbTime_start(Compute, "Performing Sequence computation");
     gctr(RoundKey, ICB, PT, PTlen_bits, CT);
-    wbTime_stop(Compute, "Performing CUDA computation");
+    wbTime_stop(Compute, "Performing Sequence computation");
     
     ghash(H, CT, PTlen_bits, S);
 
@@ -481,7 +501,13 @@ int aes_gcm_128_encrypt(
     return 0;
 }
 
-
+/*
+ *
+ * main 
+ *      Takes inputs as PT text, CT text and -t vector
+ *      PT text is used for AES 128 encryption
+ *      CT is used for verification
+ */
 int main(int argc, char *argv[]) {
   wbArg_t args;
   int PT_Len;
@@ -517,7 +543,6 @@ int main(int argc, char *argv[]) {
   // Launching Sequential
   // ----------------------------------------------------------
   wbLog(TRACE, "Launching Sequential computation");
-  //wbTime_start(Compute, "Performing CUDA computation");
   //@@ Perform Sequential computation here
   aes_gcm_128_encrypt(
                       HardCoded_Key,
@@ -530,7 +555,6 @@ int main(int argc, char *argv[]) {
                       TAG, 
                       TAG_LEN
   );
-  //wbTime_stop(Compute, "Performing CUDA computation");
 
 #if DEBUG_ENABLE
 	printf("\n\n Calculated Cipher Data : \n");

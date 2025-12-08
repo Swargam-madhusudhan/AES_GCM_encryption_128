@@ -27,7 +27,7 @@ for i in range(21):
 		nCorrect += 1
 	else:
 		print(str(i) + " incorrect")
-	ComputeMatch = re.search(b'\\{.*"elapsed_time": (\\d+).*"message": "Performing CUDA computation"',result)
+	ComputeMatch = re.search(b'\\{.*"elapsed_time": (\\d+).*"message": "Performing Sequence computation"',result)
 	ExecuteTime = int(ComputeMatch.group(1))
 	print("Dataset/" + str(i) + "Execute Time:" + str(ExecuteTime))
 

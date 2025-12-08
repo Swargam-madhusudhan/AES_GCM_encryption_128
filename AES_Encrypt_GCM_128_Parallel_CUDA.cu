@@ -17,12 +17,12 @@
  * 			  -> nvvp
  * Algorithm improvements
  *        -> AES T Table technique for faster encryption
- * Improvements achieved:
- *        -> Todo Update values
+ *
+ * Command: ./AES_Encrypt_GCM_128_Parallel_CUDA -i ../Dataset_128/<DATASET NO>/PT.dat -e ../Dataset_128/<DATASET NO>/CT.dat -t vector
  *
  * @Author: Madhusudhan Swargam <mswargam@oakland.edu>
  *          Prathiksha Chikkamadal Manjunatha <pchikkamadalman@oakland.edu>
- * Source : Algorithm SOurce code reference :
+ * Source : Algorithm Source code reference :
  *            https://web.mit.edu/freebsd/head/contrib/wpa/src/crypto/aes-gcm.c
  * @date 2025-Nov
  * @copyright
@@ -147,7 +147,7 @@ byte *d_GlobalSbox; // S-Box in Global Memory
 /********************* Algorithm Helper Functions **********************************/
  
 /*
- * 5.1.1 SUBBYTES() is an invertible, non-linear transformation of 
+ * 5.1.1 SUBBYTES() is an invertible, non-linear transformation of
  * the state in which a substitution table, called an S-box,
  * is applied independently to each byte in the state
  *
@@ -179,9 +179,10 @@ void SubBytes(state_t* state) {
     }
 }
 /*
- * TODO
+ * 5.1.2 SHIFTROWS()  SHIFTROWS() is a transformation of the state in which the bytes
+ * in the last three rows of the state are cyclically shifted
  *
- * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
+ * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
  */
  __host__ __device__
 void ShiftRows(state_t* state) {
@@ -205,7 +206,7 @@ void ShiftRows(state_t* state) {
 }
 
 
-/*Multiplication in GF(28) */
+/* Multiplication in GF(28) */
  __host__ __device__
 byte xtime(byte x) {
     return ((x << 1) ^ (((x >> 7) & 1) * 0x1b));
@@ -213,9 +214,10 @@ byte xtime(byte x) {
 
 
 /*
- * TODO
+ * 5.1.3 MIXCOLUMNS() is a transformation of the state that multiplies each of
+ * the four columns of the state by a single fxed matrix
  *
- * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
+ * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
  */
  __host__ __device__
 void MixColumns(state_t* state) {
@@ -245,25 +247,25 @@ void MixColumns(state_t* state) {
  void KeyExpansion(byte RoundKey[176], const byte Key[16]) {
     unsigned i, j, k;
     byte temp[4];
-	/*Initialize first 4 words W0 - W3 */
+    /*Initialize first 4 words W0 - W3 */
     for (i = 0; i < Nk; ++i) {
         RoundKey[i * 4 + 0] = Key[i * 4 + 0];
         RoundKey[i * 4 + 1] = Key[i * 4 + 1];
         RoundKey[i * 4 + 2] = Key[i * 4 + 2];
         RoundKey[i * 4 + 3] = Key[i * 4 + 3];
     }
-	
-	/* Need to calculate remaining W4 - W43 */
+
+    /* Need to calculate remaining W4 - W43 */
     for (i = Nk; i < Nb * (Nr + 1); ++i) {
         k = (i - 1) * 4;
-		/* Left Shift the Word */
+        /* Left Shift the Word */
         temp[0] = RoundKey[k + 0];
         temp[1] = RoundKey[k + 1];
         temp[2] = RoundKey[k + 2];
         temp[3] = RoundKey[k + 3];
         if (i % Nk == 0) {
             {
-				/* Left Shift the Word */
+                /* Left Shift the Word */
                 byte u = temp[0];
                 temp[0] = temp[1];
                 temp[1] = temp[2];
@@ -271,7 +273,7 @@ void MixColumns(state_t* state) {
                 temp[3] = u;
             }
             {
-				/* Substitute the S box word */
+                /* Substitute the S box word */
                 temp[0] = sbox[temp[0]];
                 temp[1] = sbox[temp[1]];
                 temp[2] = sbox[temp[2]];
@@ -279,7 +281,7 @@ void MixColumns(state_t* state) {
             }
             temp[0] = temp[0] ^ Rcon[i / Nk];
         }
-		/* Update the key*/
+        /* Update the key*/
         j = i * 4;
         k = (i - Nk) * 4;
         RoundKey[j + 0] = RoundKey[k + 0] ^ temp[0];
@@ -292,10 +294,11 @@ void MixColumns(state_t* state) {
 
 
 /*
- * TODO
+ * 5.1 CIPHER() 
+ * AES encryption implemented as per Pseudocode for CIPHER() 
  *
- * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
- */ 
+ * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
+ */
 
 void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) {
     state_t state_buf;
@@ -323,14 +326,13 @@ void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[176]) 
 }
 
 /*
- * TODO 6.3 Multiplication Operation on Blocks 
-The • operation on (pairs of) the 2128 possible blocks corresponds to the multiplication operation
-for the binary Galois (finite) field of 2128 elements
+ * 6.3 Multiplication Operation on Blocks 
+ * operation on (pairs of) the 2128 possible blocks corresponds to the multiplication operation
+ * for the binary Galois (finite) field of 2128 elements
  *
- * Source : https://csrc.nist.rip/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-revised-spec.pdf TODO
+ * Source : https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
  */
 
-// GCM GF(2^128) multiplication  Header TODO
 void gcm_gf_mult(const block_t x, const block_t y, block_t z) {
     memset(z, 0, 16);
     block_t v;
@@ -353,7 +355,9 @@ void gcm_gf_mult(const block_t x, const block_t y, block_t z) {
 }
 
 
-//  Header TODO
+/*
+ * gcm_inc_counter : Used to increment the lower bits of IV + counter data
+ */
 void gcm_inc_counter(block_t ctr) {
     for (int i = 15; i >= 12; --i) {
         ctr[i]++;
@@ -361,14 +365,21 @@ void gcm_inc_counter(block_t ctr) {
     }
 }
 
-// Header TODO
+/*
+ * xor_blocks : used to calcluate the xor operation on the provided block_t
+ *
+ */
 void xor_blocks(block_t out, const block_t a, const block_t b) {
     for (int i = 0; i < 16; ++i) {
         out[i] = a[i] ^ b[i];
     }
 }
 
-// GCTR: AES-CTR mode encryption   Header TODO
+/*
+ * 6.5 GCTR Function 
+ * Calculates the data encryption and does the Xor operation
+ * Source: https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
+ */
 void gctr(const byte* RoundKey, const block_t ICB, const byte* in, size_t len_bits, byte* out) {
     block_t ctr_block, enc_ctr_block;
     memcpy(ctr_block, ICB, 16);
@@ -422,6 +433,7 @@ uint32_t cpu_swap(uint32_t val) {
            ((val <<  8) & 0x00ff0000) | 
            ((val << 24) & 0xff000000);
 }
+
 
 void precompute_tables_little_endian(uint32_t* Te0, uint32_t* Te1, uint32_t* Te2, uint32_t* Te3) {
    for (int i = 0; i < 256; i++) {
@@ -609,12 +621,17 @@ __global__ void gctr_kernel(
 
 
 
-//   Header TODO
+/*
+ * 6.4 GHASH Function 
+ *
+ *
+ * Source https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
+ */
 void ghash(const block_t H, const byte* X, size_t len_bits, block_t S) {
     block_t Y;
     memcpy(Y, S, 16);
 
-    block_t temp_Y; // Buffer for gcm_gf_mult output
+    block_t temp_Y;
     
     size_t total_bytes = (len_bits + 7) / 8;
     size_t offset = 0;
@@ -651,7 +668,11 @@ void ghash(const block_t H, const byte* X, size_t len_bits, block_t S) {
     memcpy(S, Y, 16);
 }
 
-//  Header TODO Function
+/* 
+ * aes_gcm_128_encrypt Does the AES GCM 128 encryption
+ * 7.1 Algorithm for the Authenticated Encryption Function
+ * Source : https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
+ */
 int aes_gcm_128_encrypt(
     const byte Key[16],
     const byte IV[12],
@@ -665,12 +686,15 @@ int aes_gcm_128_encrypt(
 ) {
     int pt_len_bytes = PTlen_bits/8;
     byte RoundKey[176];
+    //Calculate the Key words used for encryption. This method uses same key for all data update
     KeyExpansion(RoundKey, Key);
 
     block_t H, Z;
     memset(Z, 0, 16);
+    // encrypt the initial Zero data 
     AES_encrypt_block(H, Z, RoundKey);
 
+    //IV data updated used for next data update
     block_t J0;
     memcpy(J0, IV, 12);
     J0[12] = 0; J0[13] = 0; J0[14] = 0; J0[15] = 1;
@@ -681,7 +705,7 @@ int aes_gcm_128_encrypt(
  
     byte* dev_PT;
     byte* dev_CT;
-    int pt_len_padded = ((pt_len_bytes + 15) / 16) * 16; // padded the data to 16 bytes of data used by AES
+    int pt_len_padded = ((pt_len_bytes + 15) / 16) * 16; //Round off to 16 bytes used by AES
     
     // Allocate memory for CT and PT
     wbCheck(cudaMalloc((void **)&dev_PT, pt_len_padded));
@@ -706,17 +730,20 @@ int aes_gcm_128_encrypt(
     wbCheck(cudaMemcpy(d_Te2, h_Te2, 256 * sizeof(uint32_t), cudaMemcpyHostToDevice));
     wbCheck(cudaMemcpy(d_Te3, h_Te3, 256 * sizeof(uint32_t), cudaMemcpyHostToDevice));
     wbCheck(cudaMemcpy(d_GlobalSbox, sbox, 256 * sizeof(byte), cudaMemcpyHostToDevice));
+    
     wbCheck(cudaMemcpyToSymbol(d_RoundKey, RoundKey, 176)); // Constant memory usage
     
+    //initialize the streams
     cudaStream_t streams[NUM_STREAMS];
-
     for (int i = 0; i < NUM_STREAMS; ++i) cudaStreamCreate(&streams[i]);
     
-    const int Min_Chunk_data = 64 * 1024;     // 64 KB (Below this, overhead hurts)
-    const int MAX_Saturation_Chunk_data = 4 * 1024 * 1024; // 4 MB (Bus is saturated)
+    const int Min_Chunk_data = 64 * 1024;     // 64 KB (Minimum chunk data to handle)
+    const int MAX_Saturation_Chunk_data = 4 * 1024 * 1024; // 4 MB (Maximum chunk data)
 
+    // total chunk data handled by one stream
     int target_chunk_size = pt_len_bytes / NUM_STREAMS;
 
+    //Saturate the chunk size
     if (target_chunk_size < Min_Chunk_data) {
         target_chunk_size = Min_Chunk_data;
     }
@@ -728,19 +755,21 @@ int aes_gcm_128_encrypt(
     if (pt_len_bytes < Min_Chunk_data) {
         target_chunk_size = pt_len_bytes;
     }
+    // Round off the chunkdata to 32
     int chunk_size_bytes = ((target_chunk_size + 31) / 32) * 32;
 
-    // Recalculate Total Chunks
+    // Calulate no of Chunks handles
     int total_chunks = (pt_len_bytes + chunk_size_bytes - 1) / chunk_size_bytes;
 
     printf("Dynamic Optimization: %d streams processing chunks of %d bytes.\n", NUM_STREAMS, chunk_size_bytes);
     
    
     for (int i = 0; i < total_chunks; ++i) {
-        int stream_id = i % NUM_STREAMS;
+    int stream_id = i % NUM_STREAMS;
         int offset = i * chunk_size_bytes;
         // Handling corner case for last chunk of data
         int current_bytes = (offset + chunk_size_bytes > pt_len_padded) ? (pt_len_padded - offset) : chunk_size_bytes;
+        // corner case check
         if (current_bytes <= 0) break;
 
         int current_blocks = current_bytes / 16; 
@@ -749,6 +778,7 @@ int aes_gcm_128_encrypt(
         // Async Copy HostToDevice
         wbCheck(cudaMemcpyAsync(&dev_PT[offset], &PT[offset], current_bytes, cudaMemcpyHostToDevice, streams[stream_id]));
 
+        // Maximum speed is achieved at thread 128 
         int threads_per_block = 128;
         int blocks = (current_blocks + threads_per_block - 1) / threads_per_block;
         if(blocks == 0) blocks = 1;
@@ -767,10 +797,13 @@ int aes_gcm_128_encrypt(
         wbCheck(cudaMemcpyAsync(&CT[offset], &dev_CT[offset], current_bytes, cudaMemcpyDeviceToHost, streams[stream_id]));
     }
     
-    
+    // wait for the cuda streams to complete
     for (int i = 0; i < NUM_STREAMS; ++i) cudaStreamSynchronize(streams[i]);
-    
+
+    // end of calculation
     wbTime_stop(Compute, "Performing CUDA computation");
+
+    // Calculate the ghash
     block_t S;
     memset(S, 0, 16);
     ghash(H, AAD, AADlen_bits, S);
@@ -793,47 +826,58 @@ int aes_gcm_128_encrypt(
     memcpy(Tag, full_tag, Taglen_bytes);
 
     // Free device memory
-    cudaFree(dev_PT); cudaFree(dev_CT);
-    cudaFree(d_Te0); cudaFree(d_Te1); cudaFree(d_Te2); cudaFree(d_Te3); cudaFree(d_GlobalSbox);
+    cudaFree(dev_PT);
+    cudaFree(dev_CT);
+    cudaFree(d_Te0);
+    cudaFree(d_Te1);
+    cudaFree(d_Te2);
+    cudaFree(d_Te3);
+    cudaFree(d_GlobalSbox);
     return 0;
 }
 
+/*
+ *
+ * main 
+ *      Takes inputs as PT text, CT text and -t vector
+ *      PT text is used for AES 128 encryption
+ *      CT is used for verification
+ */
 
 int main(int argc, char *argv[]) {
-  wbArg_t args;
-  int PT_Len;
-  byte *PT; 
-  byte *CT;
-  byte *TAG;
-  args = wbArg_read(argc, argv);
+    wbArg_t args;
+    int PT_Len;
+    byte *PT; 
+    byte *CT;
+    byte *TAG;
+    args = wbArg_read(argc, argv);
 
-  wbTime_start(Generic, "Importing data and creating memory on host");
-  float *vec = (float *)wbImport(wbArg_getInputFile(args, 0), &PT_Len);
-  wbTime_stop(Generic, "Importing data and creating memory on host");
-  
-  // Convert float WbImport data to uint8 data for calculation
-  cudaMallocHost((void**)&PT,PT_Len * sizeof(byte));
-  for (int i = 0; i < PT_Len; i++) { 
-    PT[i] = (uint8_t)vec[i];
-  }
+    wbTime_start(Generic, "Importing data and creating memory on host");
+    float *vec = (float *)wbImport(wbArg_getInputFile(args, 0), &PT_Len);
+    wbTime_stop(Generic, "Importing data and creating memory on host");
+
+    // Convert float WbImport data to uint8 data for calculation
+    cudaMallocHost((void**)&PT,PT_Len * sizeof(byte));
+    for (int i = 0; i < PT_Len; i++) { 
+        PT[i] = (uint8_t)vec[i];
+    }
 
 #if DEBUG_ENABLE
-  printf("\n\n Input file Plain Text PT : \n");
-  for(int i =0; i < PT_Len ; i++) {
-    printf("[%d] = 0x%x : %f \n", i,PT[i], vec[i]);
-  }
-  printf("\n\n");
+    printf("\n\n Input file Plain Text PT : \n");
+    for(int i =0; i < PT_Len ; i++) {
+        printf("[%d] = 0x%x : %f \n", i,PT[i], vec[i]);
+    }
+    printf("\n\n");
 #endif
 
-  wbLog(TRACE, "The input length is ", PT_Len);
-  printf(" \n\n The PT length is %d \n", PT_Len);
-  cudaMallocHost ((void**)&CT, PT_Len * sizeof(byte));
-  cudaMallocHost((void**)&TAG, TAG_LEN * sizeof(byte));
+    wbLog(TRACE, "The input length is ", PT_Len);
+    cudaMallocHost ((void**)&CT, PT_Len * sizeof(byte));
+    cudaMallocHost((void**)&TAG, TAG_LEN * sizeof(byte));
 
 
-  // Launching Paralllel computation
-  wbLog(TRACE, "Launching Paralllel computation");
-  aes_gcm_128_encrypt(
+    // Launching Paralllel computation
+    wbLog(TRACE, "Launching Paralllel computation");
+    aes_gcm_128_encrypt(
                       HardCoded_Key,
                       HardCoded_IV,
                       PT,
@@ -843,14 +887,14 @@ int main(int argc, char *argv[]) {
                       CT, 
                       TAG, 
                       TAG_LEN
-  );
+    );
 
 #if DEBUG_ENABLE
-	printf("\n\n Calculated Cipher Data : \n");
-	for(int i =0; i < PT_Len ; i++) {
-		printf("[%d] = %x \n", i,CT[i]);
-	}
-	printf("\n\n");
+    printf("\n\n Calculated Cipher Data : \n");
+    for(int i =0; i < PT_Len ; i++) {
+        printf("[%d] = %x \n", i,CT[i]);
+    }
+    printf("\n\n");
 #endif 
   
 	// Convert Cipher to verify with WB library
@@ -859,16 +903,15 @@ int main(int argc, char *argv[]) {
 		CT_float[i] = (float)CT[i];
 	}
   
-  // Verify correctness
-  // -----------------------------------------------------
-  wbSolution(args, CT_float, PT_Len);
+    // Verify correctness
+    wbSolution(args, CT_float, PT_Len);
 
-  // Free the memory
-  cudaFreeHost(CT);
-  cudaFreeHost(PT);
-  cudaFreeHost(TAG);
-  free(CT_float);
-  
-  //Return Success
-  return 0;
+    // Free the memory
+    cudaFreeHost(CT);
+    cudaFreeHost(PT);
+    cudaFreeHost(TAG);
+    free(CT_float);
+
+    //Return Success
+    return 0;
 }

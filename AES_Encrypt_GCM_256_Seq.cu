@@ -1,12 +1,14 @@
 /**
- * @file AES_Encryption_GCM_Mode.cu
- * @brief AES encryption 128 Sequence code evaluation.
+ * @file AES_Encrypt_GCM_256_Seq.cu
+ * @brief AES encryption 256 Sequence code evaluation.
  *
  * 
- * 
+ *  Command: ./AES_Encrypt_GCM_256_Seq -i ../Dataset_256/<DATASET NO>/PT.dat -e ../Dataset_256/<DATASET NO>/CT.dat -t vector
  *
  * @Author: Madhusudhan Swargam <mswargam@oakland.edu>
  *          Prathiksha Chikkamadal Manjunatha <pchikkamadalman@oakland.edu>
+ * Source : Algorithm Source code reference :
+ *            https://web.mit.edu/freebsd/head/contrib/wpa/src/crypto/aes-gcm.c
  * @date 2025-Nov
  * @copyright
  */
@@ -44,36 +46,27 @@ typedef byte block_t[16];
  */
 typedef byte state_t[4][4];
 
-#define AES_BLOCK_SIZE	  16  // 128 bits - 8 bytes
-#define AES_KEY_SIZE	    32    // 256 bit AES Key
-#define AES_NO_ROUNDS	    14    // 10 rounds for 128 bit key
+#define AES_BLOCK_SIZE	    16      // 128 bits - 8 bytes
+#define AES_KEY_SIZE	    32      // 256 bit AES Key
+#define AES_NO_ROUNDS	    14      // 14 rounds for 256 bit key
   
  /* 
   *
   * Hardcoded values for Project demonstration
-  * [Keylen = 128]
+  * [Keylen = 256]
   * [IVlen = 96]
   * [PTlen = 128]
   * [AADlen = 160]
-  * [Taglen = 112]
-  * 
-  * Count = 0
-  * Key = 87f96a86404a2c793b26d7e12c5aaffa
-  * IV = 5c6699381a9360ec83dd98dc
-  * PT = 43b2b8c81cfcc1e5a27b171e80dcf74f
-  * AAD = f89016b26cea39ea38a038a0f18af53f72f7fd17
-  * CT = 4f3112a81a3531261ce900d92b43faf2
-  * Tag = c3a2481fc31a33b46c6b64041d5d
   * Source : https://csrc.nist.gov/Projects/cryptographic-algorithm-validation-program/cavp-testing-block-cipher-modes
   */
  
  
- #define AAD_LEN_BITS 	  (160)
- #define AAD_LEN_BYTE 	  (AAD_LEN_BITS/8)
- #define KEY_LEN_BITS  	  (256)
- #define KEY_LEN_BYTE 	  (KEY_LEN_BITS/8)
- #define IV_LEN_BITS	    (96)
- #define IV_LEN_BYTE	    (IV_LEN_BITS/8)
+ #define AAD_LEN_BITS 	        (160)
+ #define AAD_LEN_BYTE 	        (AAD_LEN_BITS/8)
+ #define KEY_LEN_BITS  	        (256)
+ #define KEY_LEN_BYTE 	        (KEY_LEN_BITS/8)
+ #define IV_LEN_BITS	        (96)
+ #define IV_LEN_BYTE	        (IV_LEN_BITS/8)
  #define TAG_LEN		      (16)
  byte HardCoded_Key[KEY_LEN_BYTE] = {0x83, 0x68, 0x8d, 0xeb,
                                     0x4a, 0xf8, 0x00, 0x7f,
@@ -117,9 +110,6 @@ typedef byte state_t[4][4];
     0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
     0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 };
-
-
-//TODO used reference as https://web.mit.edu/freebsd/head/contrib/wpa/src/crypto/aes-gcm.c
 
 
  /*
@@ -172,10 +162,12 @@ void SubBytes(state_t* state) {
         }
     }
 }
+
 /*
- * TODO
+ * 5.1.2 SHIFTROWS()  SHIFTROWS() is a transformation of the state in which the bytes
+ * in the last three rows of the state are cyclically shifted
  *
- * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
+ * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
  */
 void ShiftRows(state_t* state) {
     byte temp;
@@ -205,9 +197,10 @@ byte xtime(byte x) {
 
 
 /*
- * TODO
+ * 5.1.3 MIXCOLUMNS() is a transformation of the state that multiplies each of
+ * the four columns of the state by a single fxed matrix
  *
- * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
+ * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
  */
 void MixColumns(state_t* state) {
     byte a, b, c, d;
@@ -290,9 +283,10 @@ void MixColumns(state_t* state) {
 
 
 /*
- * TODO
+ * 5.1 CIPHER() 
+ * AES encryption implemented as per Pseudocode for CIPHER() 
  *
- * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf TODO
+ * Source : https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
  */
 void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[240]) {
     state_t state_buf;
@@ -320,17 +314,14 @@ void AES_encrypt_block(block_t out, const block_t in, const byte RoundKey[240]) 
 }
 
 
+
 /*
- * TODO 6.3 Multiplication Operation on Blocks 
-The • operation on (pairs of) the 2128 possible blocks corresponds to the multiplication operation
-for the binary Galois (finite) field of 2128 elements
+ * 6.3 Multiplication Operation on Blocks 
+ * operation on (pairs of) the 2128 possible blocks corresponds to the multiplication operation
+ * for the binary Galois (finite) field of 2128 elements
  *
- * Source : https://csrc.nist.rip/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-revised-spec.pdf TODO
+ * Source : https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
  */
-
-
-
-// GCM GF(2^128) multiplication  Header TODO
 void gcm_gf_mult(const block_t x, const block_t y, block_t z) {
     memset(z, 0, 16);
     block_t v;
@@ -353,7 +344,9 @@ void gcm_gf_mult(const block_t x, const block_t y, block_t z) {
 }
 
 
-//  Header TODO
+/*
+ * gcm_inc_counter : Used to increment the lower bits of IV + counter data
+ */
 void gcm_inc_counter(block_t ctr) {
     for (int i = 15; i >= 12; --i) {
         ctr[i]++;
@@ -361,14 +354,21 @@ void gcm_inc_counter(block_t ctr) {
     }
 }
 
-// Header TODO
+/*
+ * xor_blocks : used to calcluate the xor operation on the provided block_t
+ *
+ */
 void xor_blocks(block_t out, const block_t a, const block_t b) {
     for (int i = 0; i < 16; ++i) {
         out[i] = a[i] ^ b[i];
     }
 }
 
-// GCTR: AES-CTR mode encryption   Header TODO
+/*
+ * 6.5 GCTR Function 
+ * Calculates the data encryption and does the Xor operation
+ * Source: https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
+ */
 void gctr(const byte* RoundKey, const block_t ICB, const byte* in, size_t len_bits, byte* out) {
     block_t ctr_block, enc_ctr_block;
     memcpy(ctr_block, ICB, 16);
@@ -397,7 +397,12 @@ void gctr(const byte* RoundKey, const block_t ICB, const byte* in, size_t len_bi
     }
 }
 
-//   Header TODO
+/*
+ * 6.4 GHASH Function 
+ *
+ *
+ * Source https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
+ */
 void ghash(const block_t H, const byte* X, size_t len_bits, block_t S) {
     block_t Y;
     memcpy(Y, S, 16);
@@ -439,7 +444,11 @@ void ghash(const block_t H, const byte* X, size_t len_bits, block_t S) {
     memcpy(S, Y, 16);
 }
 
-//  Header TODO
+/* 
+ * aes_gcm_256_encrypt Does the AES GCM 256 encryption
+ * 7.1 Algorithm for the Authenticated Encryption Function
+ * Source : https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf
+ */
 int aes_gcm_256_encrypt(
     const byte Key[32],
     const byte IV[12],
@@ -469,9 +478,9 @@ int aes_gcm_256_encrypt(
     block_t ICB;
     memcpy(ICB, J0, 16);
     gcm_inc_counter(ICB);
-    wbTime_start(Compute, "Performing CUDA computation");
+    wbTime_start(Compute, "Performing Sequential computation");
     gctr(RoundKey, ICB, PT, PTlen_bits, CT);
-    wbTime_stop(Compute, "Performing CUDA computation");
+    wbTime_stop(Compute, "Performing Sequential computation");
     
     ghash(H, CT, PTlen_bits, S);
 
@@ -494,7 +503,13 @@ int aes_gcm_256_encrypt(
     return 0;
 }
 
-
+/*
+ *
+ * main 
+ *      Takes inputs as PT text, CT text and -t vector
+ *      PT text is used for AES 256 encryption
+ *      CT is used for verification
+ */
 int main(int argc, char *argv[]) {
   wbArg_t args;
   int PT_Len;
@@ -530,7 +545,6 @@ int main(int argc, char *argv[]) {
   // Launching Sequential
   // ----------------------------------------------------------
   wbLog(TRACE, "Launching Sequential computation");
-  //wbTime_start(Compute, "Performing CUDA computation");
   //@@ Perform Sequential computation here
   aes_gcm_256_encrypt(
                       HardCoded_Key,
@@ -543,7 +557,6 @@ int main(int argc, char *argv[]) {
                       TAG, 
                       TAG_LEN
   );
-  //wbTime_stop(Compute, "Performing CUDA computation");
 
 #if DEBUG_ENABLE
 	printf("\n\n Calculated Cipher Data : \n");
