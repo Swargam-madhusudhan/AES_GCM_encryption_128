@@ -28,6 +28,11 @@ for i in range(21):
 		print(str(i) + " incorrect")
 	ComputeMatch = re.search(b'\\{.*"elapsed_time": (\\d+).*"message": "Performing CUDA computation"',result)
 	ExecuteTime = int(ComputeMatch.group(1))
-	print("Dataset/" + str(i) + "Execute Time:" + str(ExecuteTime))
+	lenMatch = re.search(b'The input length is (\d+)', result)
+	input_size_bytes = int(lenMatch.group(1))
+	execution_time_seconds = ExecuteTime / 1e9
+	throughput_gbs = (input_size_bytes / 1e9) / execution_time_seconds
+
+	print("Dataset/" + str(i) + ": Input Size: " + str(input_size_bytes) + " bytes" + ": Execute Time:" + str(ExecuteTime) + ": Throughput: " + str(throughput_gbs) + " GB/s" )
 
 print(str(nCorrect) + " / 21 correct")
